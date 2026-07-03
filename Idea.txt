@@ -1,0 +1,17 @@
+# PromptGod: The AI Prompt Sanitizer
+
+**Overview**
+PromptGod is a Chrome Extension designed to protect users' sensitive data when interacting with AI chatbots (like ChatGPT, Gemini, Claude) or any web-based text input. Often, developers and users accidentally paste code snippets, environment variables, or logs that contain sensitive information such as API keys, passwords, authentication tokens, and private IP addresses. PromptGod automatically detects and sanitizes this information before it is sent to external servers.
+
+**Core Features**
+1. **Auto-Intercept & Mask on Paste**: When you paste text into chatbots like ChatGPT, Gemini, or Grok, PromptGod intercepts the paste event. It automatically replaces sensitive patterns (API keys, passwords, `.env` formats) with asterisks (`********`) right inside the chat text box.
+2. **Secure Vault in Extension UI**: The original unmasked values that were redacted from your pasted text are securely saved and can be viewed inside the extension's popup UI. You always have a record of what was hidden.
+3. **On-Demand Sanitization**: A "Sanitize" button for manual triggers on currently typed text, just in case you manually type sensitive data instead of pasting.
+4. **Customizable Rules**: Users can define their own custom patterns or keywords to mask in the extension settings.
+5. **Local Processing**: All pattern matching and sanitization happens locally in the user's browser, ensuring sensitive data never leaves their machine unmasked.
+
+**Target Audience**
+Developers, data scientists, IT professionals, and privacy-conscious users who frequently copy-paste code and data into LLM interfaces.
+
+**Why it matters**
+Prevents accidental leaks of proprietary data and security credentials, enforcing best security practices without hindering the productivity gained by using AI assistants.

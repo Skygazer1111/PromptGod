@@ -386,12 +386,30 @@ body::-webkit-scrollbar-thumb:hover {
 /* --- Footer --- */
 .footer {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 10px 18px;
   border-top: 1px solid var(--border);
   font-size: 10px;
   color: var(--text-muted);
+}
+
+.footer-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer-sep {
+  color: var(--border);
+  font-size: 8px;
+}
+
+.footer-copyright {
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
 .footer a {

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PromptGod — Privacy Policy</title>
+  <link rel="stylesheet" href="legal.css">
+</head>
+<body>
+  <div class="container">
+    <a href="#" class="back-link" onclick="window.close(); return false;">← Back to PromptGod</a>
+
+    <h1>Privacy Policy</h1>
+    <p class="last-updated">Last updated: July 3, 2025</p>
+
+    <section>
+      <h2>1. Overview</h2>
+      <p>PromptGod is designed with privacy as a core principle. This Privacy Policy explains what data the Extension handles and how it is processed.</p>
+    </section>
+
+    <section>
+      <h2>2. Data We Collect</h2>
+      <p><strong>We do not collect any personal data.</strong> PromptGod does not send any information to external servers. There is no analytics, no telemetry, and no tracking of any kind.</p>
+    </section>
+
+    <section>
+      <h2>3. Data Processed Locally</h2>
+      <p>The Extension processes the following data <strong>entirely within your browser</strong>:</p>
+      <ul>
+        <li><strong>Clipboard text:</strong> When you paste text into a supported AI chatbot, the Extension reads the pasted content to scan for sensitive patterns. This data is never transmitted.</li>
+        <li><strong>Chat input text:</strong> When you click the manual Sanitize button, the Extension reads the current text in the chat input field. This data is never transmitted.</li>
+        <li><strong>Vault entries:</strong> Detected sensitive values are stored in <code>chrome.storage.local</code> so you can review them in the popup. This storage is sandboxed to the Extension and accessible only on your device.</li>
+        <li><strong>Custom rules:</strong> Any custom regex patterns or keywords you create are stored in <code>chrome.storage.local</code> on your device.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. Data Sharing</h2>
+      <p><strong>We do not share any data with third parties.</strong> Since no data leaves your browser, there is nothing to share.</p>
+    </section>
+
+    <section>
+      <h2>5. Data Retention</h2>
+      <p>Vault entries and custom rules are stored locally until you choose to clear them. You can clear all vault data at any time by clicking the "Clear" button in the Extension popup. Uninstalling the Extension removes all stored data.</p>
+    </section>
+
+    <section>
+      <h2>6. Permissions Used</h2>
+      <p>The Extension requests the following Chrome permissions:</p>
+      <ul>
+        <li><strong>storage:</strong> To save vault entries, custom rules, and extension settings locally.</li>
+        <li><strong>activeTab:</strong> To interact with the currently active tab for text sanitization.</li>
+        <li><strong>scripting:</strong> To inject the content script that intercepts paste events.</li>
+        <li><strong>clipboardRead:</strong> To read pasted text for scanning.</li>
+        <li><strong>Host permissions:</strong> To run on supported AI chatbot websites only (ChatGPT, Gemini, Claude, Copilot, etc.).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>7. Children's Privacy</h2>
+      <p>The Extension is not directed at children under 13. We do not knowingly collect any data from anyone, including children.</p>
+    </section>
+
+    <section>
+      <h2>8. Changes to This Policy</h2>
+      <p>We may update this Privacy Policy from time to time. Any changes will be reflected by the "Last updated" date at the top of this page.</p>
+    </section>
+
+    <section>
+      <h2>9. Contact</h2>
+      <p>If you have questions about this Privacy Policy, you can open an issue on the <a href="https://github.com/Skygazer1111/PromptGod" target="_blank">GitHub repository</a>.</p>
+    </section>
+
+    <footer>
+      <p>© 2025 PromptGod. All rights reserved.</p>
+    </footer>
+  </div>
+</body>
+</html>

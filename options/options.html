@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PromptGod — Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🛡️</span>
+        <div>
+          <h1>PromptGod Settings</h1>
+          <p class="tagline">Customize your sanitization rules</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Built-in Rules -->
+    <section class="card">
+      <div class="card-header">
+        <h2>📋 Built-in Rules</h2>
+        <span class="badge" id="builtin-count"></span>
+      </div>
+      <p class="card-desc">These rules are always active and cannot be removed. They cover the most common secret patterns.</p>
+      <div class="rules-grid" id="builtin-rules">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+    <!-- Custom Rules -->
+    <section class="card">
+      <div class="card-header">
+        <h2>✏️ Custom Rules</h2>
+        <span class="badge" id="custom-count">0</span>
+      </div>
+      <p class="card-desc">Add your own patterns to detect. These are merged with the built-in rules when scanning pasted text.</p>
+
+      <!-- Add Rule Form -->
+      <div class="add-rule-form" id="add-rule-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="rule-name">Rule Name</label>
+            <input type="text" id="rule-name" placeholder="e.g., My Company Token" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="rule-type">Type</label>
+            <select id="rule-type">
+              <option value="regex">Regex Pattern</option>
+              <option value="keyword">Exact Keyword</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="rule-pattern">Pattern</label>
+          <input type="text" id="rule-pattern" placeholder="e.g., MYCO_[A-Za-z0-9]{32}  or  my-secret-value" autocomplete="off">
+          <span class="form-hint" id="pattern-hint">Enter a JavaScript-compatible regular expression (without delimiters).</span>
+        </div>
+        <div class="form-group">
+          <label for="rule-desc">Description <span class="optional">(optional)</span></label>
+          <input type="text" id="rule-desc" placeholder="e.g., Internal API token for MyCompany services" autocomplete="off">
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="add-rule-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Rule
+          </button>
+          <button class="btn btn-ghost" id="test-rule-btn">🧪 Test Pattern</button>
+        </div>
+      </div>
+
+      <!-- Test Area (hidden by default) -->
+      <div class="test-area" id="test-area" style="display: none;">
+        <label for="test-input">Test Input</label>
+        <textarea id="test-input" rows="3" placeholder="Paste sample text here to test your pattern..."></textarea>
+        <div class="test-result" id="test-result"></div>
+      </div>
+
+      <!-- Custom Rules List -->
+      <div class="custom-rules-list" id="custom-rules-list">
+        <!-- Populated by JS -->
+      </div>
+
+      <div class="empty-custom" id="empty-custom" style="display: none;">
+        <p>No custom rules yet. Add one above!</p>
+      </div>
+    </section>
+
+    <!-- Saved toast -->
+    <div class="save-toast" id="save-toast">✅ Saved!</div>
+  </div>
+
+  <script src="../sanitizer.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

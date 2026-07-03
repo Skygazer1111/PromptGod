@@ -12,25 +12,32 @@
 
   const LOG_PREFIX = "[PromptGod]";
   let isEnabled = true;
+  let cachedCustomRules = []; // Compiled custom rules from storage
 
   // ---------------------------------------------------------------
-  // 1. Check if the extension is enabled
+  // 1. Check if the extension is enabled & load custom rules
   // ---------------------------------------------------------------
   function checkEnabled() {
     if (typeof chrome !== "undefined" && chrome.storage) {
-      chrome.storage.local.get("enabled", (data) => {
+      chrome.storage.local.get(["enabled", "customRules"], (data) => {
         isEnabled = data.enabled !== false; // default to true
+        cachedCustomRules = PromptGodSanitizer.buildCustomRules(data.customRules || []);
+        console.log(`${LOG_PREFIX} Loaded ${cachedCustomRules.length} custom rule(s).`);
       });
     }
   }
   checkEnabled();
 
-  // Listen for toggle changes from the popup / background
+  // Listen for toggle changes and custom rule updates from popup / options
   if (typeof chrome !== "undefined" && chrome.storage) {
     chrome.storage.onChanged.addListener((changes) => {
       if (changes.enabled) {
         isEnabled = changes.enabled.newValue;
         console.log(`${LOG_PREFIX} Extension ${isEnabled ? "enabled" : "disabled"}.`);
+      }
+      if (changes.customRules) {
+        cachedCustomRules = PromptGodSanitizer.buildCustomRules(changes.customRules.newValue || []);
+        console.log(`${LOG_PREFIX} Custom rules updated (${cachedCustomRules.length} rules).`);
       }
     });
   }
@@ -111,8 +118,8 @@
     const pastedText = clipboardData.getData("text/plain");
     if (!pastedText || pastedText.trim().length === 0) return;
 
-    // Run sanitizer
-    const result = PromptGodSanitizer.sanitize(pastedText);
+    // Run sanitizer with custom rules
+    const result = PromptGodSanitizer.sanitize(pastedText, cachedCustomRules);
 
     // If nothing was found, let the normal paste go through
     if (result.extracted.length === 0) {
@@ -395,11 +402,180 @@
   }
 
   // ---------------------------------------------------------------
-  // 7. Attach the listener
+  // 7. Sanitize Button Injection
+  // ---------------------------------------------------------------
+
+  /**
+   * Inject a floating "Sanitize" button near the chat input.
+   * Allows users to manually sanitize text they've typed (not pasted).
+   */
+  function injectSanitizeButton() {
+    // Don't inject twice
+    if (document.getElementById("promptgod-sanitize-btn")) return;
+
+    const btn = document.createElement("button");
+    btn.id = "promptgod-sanitize-btn";
+    btn.innerHTML = `🛡️`;
+    btn.title = "PromptGod: Sanitize current text";
+
+    Object.assign(btn.style, {
+      position: "fixed",
+      bottom: "80px",
+      right: "24px",
+      zIndex: "2147483646",
+      width: "44px",
+      height: "44px",
+      borderRadius: "50%",
+      border: "1px solid #7c3aed",
+      background: "linear-gradient(135deg, #1a1a2e, #16213e)",
+      color: "#e0e0e8",
+      fontSize: "20px",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      boxShadow: "0 4px 20px rgba(124, 58, 237, 0.35)",
+      transition: "transform 0.2s ease, box-shadow 0.2s ease",
+      lineHeight: "1",
+    });
+
+    btn.addEventListener("mouseenter", () => {
+      btn.style.transform = "scale(1.1)";
+      btn.style.boxShadow = "0 6px 28px rgba(124, 58, 237, 0.5)";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.transform = "scale(1)";
+      btn.style.boxShadow = "0 4px 20px rgba(124, 58, 237, 0.35)";
+    });
+
+    btn.addEventListener("click", () => {
+      if (!isEnabled) {
+        showNotificationMessage("PromptGod is disabled. Enable it from the popup.");
+        return;
+      }
+      sanitizeCurrentInput();
+    });
+
+    document.body.appendChild(btn);
+  }
+
+  /**
+   * Find the active chat input and sanitize its current text content.
+   */
+  function sanitizeCurrentInput() {
+    const selectors = getSelectorsForCurrentSite();
+    let inputEl = null;
+
+    for (const selector of selectors) {
+      inputEl = document.querySelector(selector);
+      if (inputEl) break;
+    }
+
+    if (!inputEl) {
+      showNotificationMessage("Could not find the chat input on this page.");
+      return;
+    }
+
+    // Get the current text
+    let currentText;
+    if (inputEl.tagName === "TEXTAREA" || inputEl.tagName === "INPUT") {
+      currentText = inputEl.value;
+    } else {
+      currentText = inputEl.innerText || inputEl.textContent;
+    }
+
+    if (!currentText || currentText.trim().length === 0) {
+      showNotificationMessage("The chat input is empty — nothing to sanitize.");
+      return;
+    }
+
+    const result = PromptGodSanitizer.sanitize(currentText, cachedCustomRules);
+
+    if (result.extracted.length === 0) {
+      showNotificationMessage("No secrets detected in the current text. ✅");
+      return;
+    }
+
+    // Replace the content with masked text
+    if (inputEl.tagName === "TEXTAREA" || inputEl.tagName === "INPUT") {
+      insertIntoTextarea(inputEl, result.maskedText);
+    } else {
+      // For contenteditable, replace all content
+      inputEl.focus();
+      // Select all text
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(inputEl);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      // Insert masked text
+      document.execCommand("insertText", false, result.maskedText);
+    }
+
+    saveToVault(result.extracted);
+    showNotification(result.extracted.length);
+  }
+
+  /**
+   * Show a simple text message as a toast (for non-masking notifications).
+   */
+  function showNotificationMessage(message) {
+    const existing = document.getElementById("promptgod-toast");
+    if (existing) existing.remove();
+
+    const toast = document.createElement("div");
+    toast.id = "promptgod-toast";
+    toast.innerHTML = `
+      <span style="font-size: 18px; line-height: 1;">🛡️</span>
+      <span>${message}</span>
+    `;
+
+    Object.assign(toast.style, {
+      position: "fixed",
+      bottom: "24px",
+      right: "24px",
+      zIndex: "2147483647",
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      padding: "12px 20px",
+      background: "linear-gradient(135deg, #1a1a2e, #16213e)",
+      border: "1px solid #7c3aed",
+      borderRadius: "12px",
+      color: "#e0e0e8",
+      fontFamily: "'Segoe UI', system-ui, sans-serif",
+      fontSize: "13px",
+      boxShadow: "0 8px 32px rgba(124, 58, 237, 0.3)",
+      opacity: "0",
+      transform: "translateY(16px)",
+      transition: "opacity 0.3s ease, transform 0.3s ease",
+    });
+
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.style.opacity = "1";
+      toast.style.transform = "translateY(0)";
+    });
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(16px)";
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+  // ---------------------------------------------------------------
+  // 8. Attach the listener & inject button
   // ---------------------------------------------------------------
 
   // Use capture phase so we get the paste event before the editor does
   document.addEventListener("paste", handlePaste, true);
+
+  // Inject the Sanitize button once the page is ready
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    setTimeout(injectSanitizeButton, 1500);
+  } else {
+    window.addEventListener("load", () => setTimeout(injectSanitizeButton, 1500));
+  }
 
   console.log(
     `${LOG_PREFIX} ✅ Content script active on ${window.location.hostname}. Paste interception is ON.`

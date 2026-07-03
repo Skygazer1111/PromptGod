@@ -18,10 +18,11 @@
 - [x] Add a "Clear Vault" button in the popup to wipe the saved data from local storage.
 
 ## Build Phase 4: Manual Controls & Settings
-- [ ] Inject a manual "Sanitize" button into the DOM near the chat input (for users who type sensitive data instead of pasting).
-- [ ] Create the Options page (`options.html` and `options.js`).
-- [ ] Build a UI in the Options page allowing users to define custom Regex rules or specific keywords to mask.
-- [ ] Update `sanitizer.js` to merge user-defined custom rules with the default rulesets before running the detection.
+
+- [x] Inject a manual "Sanitize" button into the DOM near the chat input (for users who type sensitive data instead of pasting).
+- [x] Create the Options page (`options.html` and `options.js`).
+- [x] Build a UI in the Options page allowing users to define custom Regex rules or specific keywords to mask.
+- [x] Update `sanitizer.js` to merge user-defined custom rules with the default rulesets before running the detection.
 
 ## Build Phase 5: Hardening & Release
 - [ ] Expand the default Regex rulesets to cover standard patterns comprehensively (AWS, OpenAI, GitHub, generic Hex/Base64, emails).

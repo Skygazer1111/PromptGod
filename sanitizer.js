@@ -258,10 +258,42 @@ const PromptGodSanitizer = (() => {
     return DEFAULT_RULES.map((r) => ({ name: r.name, description: r.description }));
   }
 
+  /**
+   * Build regex rule objects from user-defined custom rules stored in chrome.storage.
+   * @param {Array} storedRules - Array of {name, type, pattern, description} from storage.
+   * @returns {Array} Array of rule objects compatible with the sanitize() customRules param.
+   */
+  function buildCustomRules(storedRules) {
+    if (!Array.isArray(storedRules)) return [];
+
+    return storedRules
+      .map((rule) => {
+        try {
+          let regexSource;
+          if (rule.type === "keyword") {
+            // Escape the keyword and wrap in word boundaries
+            regexSource = rule.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          } else {
+            regexSource = rule.pattern;
+          }
+          return {
+            name: rule.name || "Custom Rule",
+            regex: new RegExp(`(${regexSource})`, "g"),
+            description: rule.description || "User-defined custom rule",
+          };
+        } catch (e) {
+          console.warn(`[PromptGod] Invalid custom rule "${rule.name}":`, e.message);
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+
   // Public API
   return {
     sanitize,
     getRuleNames,
+    buildCustomRules,
   };
 })();
 

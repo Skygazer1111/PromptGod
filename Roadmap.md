@@ -25,8 +25,9 @@
 - [x] Update `sanitizer.js` to merge user-defined custom rules with the default rulesets before running the detection.
 
 ## Build Phase 5: Hardening & Release
-- [ ] Expand the default Regex rulesets to cover standard patterns comprehensively (AWS, OpenAI, GitHub, generic Hex/Base64, emails).
-- [ ] Cross-browser/Cross-site testing: Ensure the interceptor works on Gemini, Grok, Claude, and standard web forms, handling different DOM structures gracefully.
-- [ ] Optimize performance to ensure large text pastes don't freeze the browser.
-- [ ] Design the extension icon and prepare promotional assets (screenshots, descriptions).
+- [x] Expand the default Regex rulesets to cover standard patterns comprehensively (AWS, OpenAI, GitHub, generic Hex/Base64, emails).
+- [x] Cross-browser/Cross-site testing: Ensure the interceptor works on Gemini, Grok, Claude, Copilot, Perplexity, DeepSeek, Poe, HuggingFace Chat, and Mistral.
+- [x] Optimize performance to ensure large text pastes don't freeze the browser.
+- [x] Design the extension icon and prepare promotional assets (screenshots, descriptions).
+- [x] Added Microsoft Copilot, Bing Chat, Perplexity, DeepSeek, Poe, HuggingFace Chat, and Mistral support.
 - [ ] Publish PromptGod to the Chrome Web Store.

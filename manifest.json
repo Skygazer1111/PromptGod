@@ -14,7 +14,16 @@
     "*://chat.openai.com/*",
     "*://gemini.google.com/*",
     "*://grok.com/*",
-    "*://claude.ai/*"
+    "*://claude.ai/*",
+    "*://copilot.microsoft.com/*",
+    "*://www.bing.com/chat*",
+    "*://huggingface.co/chat*",
+    "*://poe.com/*",
+    "*://perplexity.ai/*",
+    "*://www.perplexity.ai/*",
+    "*://deepseek.com/*",
+    "*://chat.deepseek.com/*",
+    "*://chat.mistral.ai/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
@@ -31,7 +40,16 @@
         "*://chat.openai.com/*",
         "*://gemini.google.com/*",
         "*://grok.com/*",
-        "*://claude.ai/*"
+        "*://claude.ai/*",
+        "*://copilot.microsoft.com/*",
+        "*://www.bing.com/chat*",
+        "*://huggingface.co/chat*",
+        "*://poe.com/*",
+        "*://perplexity.ai/*",
+        "*://www.perplexity.ai/*",
+        "*://deepseek.com/*",
+        "*://chat.deepseek.com/*",
+        "*://chat.mistral.ai/*"
       ],
       "js": ["sanitizer.js", "content.js"],
       "run_at": "document_idle"

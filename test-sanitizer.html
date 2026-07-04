@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PromptGod — Sanitizer Test Suite</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0a0a1a;
+      color: #e0e0f0;
+      padding: 32px;
+      line-height: 1.6;
+    }
+
+    h1 {
+      font-size: 28px;
+      background: linear-gradient(135deg, #7c3aed, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+
+    /* ── Summary bar ── */
+    .summary {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 32px;
+      padding: 16px 24px;
+      background: #111128;
+      border: 1px solid #222244;
+      border-radius: 12px;
+    }
+    .summary-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .summary-item .count {
+      font-size: 32px;
+      font-weight: 700;
+    }
+    .summary-item .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #888;
+    }
+    .count.total { color: #a78bfa; }
+    .count.passed { color: #4ade80; }
+    .count.failed { color: #f87171; }
+
+    /* ── Category ── */
+    .category {
+      margin-bottom: 28px;
+    }
+    .category-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #13132a;
+      border: 1px solid #222244;
+      border-radius: 10px 10px 0 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .category-header:hover {
+      background: #1a1a3a;
+    }
+    .category-header h2 {
+      font-size: 16px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .category-badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    .category-badge.all-pass {
+      background: rgba(74, 222, 128, 0.15);
+      color: #4ade80;
+    }
+    .category-badge.has-fail {
+      background: rgba(248, 113, 113, 0.15);
+      color: #f87171;
+    }
+
+    .category-body {
+      border: 1px solid #222244;
+      border-top: none;
+      border-radius: 0 0 10px 10px;
+      overflow: hidden;
+    }
+
+    /* ── Individual test ── */
+    .test-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 16px;
+      border-bottom: 1px solid #1a1a30;
+      font-size: 13px;
+      transition: background 0.15s;
+    }
+    .test-row:last-child { border-bottom: none; }
+    .test-row:hover { background: #111128; }
+
+    .test-icon {
+      flex-shrink: 0;
+      font-size: 16px;
+      width: 22px;
+      text-align: center;
+      margin-top: 1px;
+    }
+
+    .test-name {
+      flex: 1;
+      font-weight: 500;
+      color: #c0c0e0;
+    }
+    .test-name .detail {
+      font-weight: 400;
+      color: #666;
+      font-size: 12px;
+      margin-top: 2px;
+      word-break: break-all;
+    }
+
+    .test-status {
+      flex-shrink: 0;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .test-status.pass {
+      background: rgba(74, 222, 128, 0.1);
+      color: #4ade80;
+    }
+    .test-status.fail {
+      background: rgba(248, 113, 113, 0.1);
+      color: #f87171;
+    }
+
+    .test-row.failed {
+      background: rgba(248, 113, 113, 0.03);
+    }
+
+    .fail-detail {
+      font-size: 11px;
+      color: #f87171;
+      background: rgba(248, 113, 113, 0.08);
+      padding: 6px 10px;
+      border-radius: 6px;
+      margin-top: 6px;
+      word-break: break-all;
+    }
+
+    .run-time {
+      color: #555;
+      font-size: 12px;
+      margin-top: 8px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🛡️ PromptGod Test Suite</h1>
+  <p class="subtitle">Sanitizer engine — comprehensive edge-case testing</p>
+
+  <div class="summary" id="summary">
+    <div class="summary-item">
+      <span class="count total" id="total-count">0</span>
+      <span class="label">Total</span>
+    </div>
+    <div class="summary-item">
+      <span class="count passed" id="passed-count">0</span>
+      <span class="label">Passed</span>
+    </div>
+    <div class="summary-item">
+      <span class="count failed" id="failed-count">0</span>
+      <span class="label">Failed</span>
+    </div>
+  </div>
+
+  <div id="results"></div>
+
+  <script src="sanitizer.js"></script>
+  <script>
+    // ═══════════════════════════════════════════════════════════════════
+    // TEST FRAMEWORK
+    // ═══════════════════════════════════════════════════════════════════
+
+    const results = { total: 0, passed: 0, failed: 0, categories: [] };
+
+    function assert(condition, name, detail = "") {
+      results.total++;
+      if (condition) {
+        results.passed++;
+        return { pass: true, name, detail };
+      } else {
+        results.failed++;
+        return { pass: false, name, detail };
+      }
+    }
+
+    function runCategory(name, testFn) {
+      const tests = [];
+      const cat = { name, tests };
+
+      const t = {
+        assert: (cond, testName, detail) => tests.push(assert(cond, testName, detail)),
+        assertEqual: (actual, expected, testName) => {
+          const pass = actual === expected;
+          tests.push(assert(pass, testName,
+            pass ? "" : `Expected: ${JSON.stringify(expected)}\nGot: ${JSON.stringify(actual)}`));
+        },
+        assertIncludes: (str, substr, testName) => {
+          const pass = str.includes(substr);
+          tests.push(assert(pass, testName,
+            pass ? "" : `Expected string to include: "${substr}"\nGot: "${str}"`));
+        },
+        assertNotIncludes: (str, substr, testName) => {
+          const pass = !str.includes(substr);
+          tests.push(assert(pass, testName,
+            pass ? "" : `Expected string NOT to include: "${substr}"\nBut it was found in: "${str}"`));
+        },
+        assertGreaterThan: (a, b, testName) => {
+          const pass = a > b;
+          tests.push(assert(pass, testName,
+            pass ? "" : `Expected ${a} > ${b}`));
+        },
+        assertLessThan: (a, b, testName) => {
+          const pass = a < b;
+          tests.push(assert(pass, testName,
+            pass ? "" : `Expected ${a} < ${b}`));
+        },
+      };
+
+      testFn(t);
+      results.categories.push(cat);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // TEST CATEGORIES
+    // ═══════════════════════════════════════════════════════════════════
+
+    // ─── 1. Hardcoded regex patterns still work ───
+    runCategory("Hardcoded Regex Patterns", (t) => {
+      // OpenAI key
+      const openai = PromptGodSanitizer.sanitize("My key is sk-abc123XYZ456def789ghij");
+      t.assert(openai.extracted.length > 0, "Detects OpenAI API key (sk-...)",
+        `Found ${openai.extracted.length} match(es)`);
+
+      // AWS Access Key
+      const aws = PromptGodSanitizer.sanitize("Use key AKIAIOSFODNN7EXAMPLE here");
+      t.assert(aws.extracted.length > 0, "Detects AWS Access Key (AKIA...)",
+        `Found ${aws.extracted.length} match(es)`);
+
+      // GitHub Token (Classic)
+      const ghp = PromptGodSanitizer.sanitize("Token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij");
+      t.assert(ghp.extracted.length > 0, "Detects GitHub Classic Token (ghp_...)",
+        `Found ${ghp.extracted.length} match(es)`);
+
+      // GitHub Fine-grained
+      const ghFine = PromptGodSanitizer.sanitize("Auth: github_pat_ABCDEFGHIJKLMNOPQRSTUVab");
+      t.assert(ghFine.extracted.length > 0, "Detects GitHub Fine-grained Token (github_pat_...)",
+        `Found ${ghFine.extracted.length} match(es)`);
+
+      // Google API Key
+      const gapi = PromptGodSanitizer.sanitize("Key: AIzaSyD-abcdefghij1234567890klmnop-qr");
+      t.assert(gapi.extracted.length > 0, "Detects Google API Key (AIza...)",
+        `Found ${gapi.extracted.length} match(es)`);
+
+      // Slack Token
+      const slack = PromptGodSanitizer.sanitize("Token: xoxb-123456789012-abcdefgh");
+      t.assert(slack.extracted.length > 0, "Detects Slack Token (xoxb-...)",
+        `Found ${slack.extracted.length} match(es)`);
+
+      // Stripe Secret Key
+      const stripe = PromptGodSanitizer.sanitize("sk_test_ABCDEFGHIJKLmnopqrstuvwxyz");
+      t.assert(stripe.extracted.length > 0, "Detects Stripe Secret Key (sk_live_...)",
+        `Found ${stripe.extracted.length} match(es)`);
+
+      // HuggingFace Token
+      const hf = PromptGodSanitizer.sanitize("Token: hf_InvalidTokenForTestingPurposes12345");
+      t.assert(hf.extracted.length > 0, "Detects HuggingFace Token (hf_...)",
+        `Found ${hf.extracted.length} match(es)`);
+
+      // GitLab Token
+      const gl = PromptGodSanitizer.sanitize("glpat-ABCDE12345FGHIJ67890xyz");
+      t.assert(gl.extracted.length > 0, "Detects GitLab Token (glpat-...)",
+        `Found ${gl.extracted.length} match(es)`);
+
+      // SendGrid API Key
+      const sg = PromptGodSanitizer.sanitize("SG.abcdefghijklmnopqrstuvwx.ABCDEFGHIJKLmnopqrstuvwx");
+      t.assert(sg.extracted.length > 0, "Detects SendGrid API Key (SG.*.*)",
+        `Found ${sg.extracted.length} match(es)`);
+
+      // JWT Token
+      const jwt = PromptGodSanitizer.sanitize("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.AbCdEfGhIjKlMnOpQrSt");
+      t.assert(jwt.extracted.length > 0, "Detects JWT Token (eyJ...)",
+        `Found ${jwt.extracted.length} match(es)`);
+
+      // Bearer token
+      const bearer = PromptGodSanitizer.sanitize("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9abcdefghijk");
+      t.assert(bearer.extracted.length > 0, "Detects Bearer Token",
+        `Found ${bearer.extracted.length} match(es)`);
+    });
+
+
+    // ─── 2. Partial Masking (1/4 visible, 3/4 starred) ───
+    runCategory("Partial Masking (¼ visible, ¾ starred)", (t) => {
+      const key = "sk-abc123XYZ456def789ghij";
+      const result = PromptGodSanitizer.sanitize(`Key: ${key}`);
+
+      t.assert(result.extracted.length > 0, "Key is detected for masking");
+
+      if (result.extracted.length > 0) {
+        const masked = result.extracted[0].masked;
+        const original = result.extracted[0].original;
+        const visibleLen = Math.ceil(original.length / 4);
+        const visiblePart = original.substring(0, visibleLen);
+
+        t.assert(masked.startsWith(visiblePart),
+          "Masked value starts with first ¼ of original",
+          `Visible: "${visiblePart}", Masked: "${masked}"`);
+
+        t.assert(masked.includes("*"),
+          "Masked value contains stars",
+          `Masked: "${masked}"`);
+
+        const starCount = (masked.match(/\*/g) || []).length;
+        t.assertGreaterThan(starCount, 0,
+          "Stars count is greater than zero");
+
+        // The visible part should NOT be starred
+        t.assertEqual(masked.substring(0, visibleLen), visiblePart,
+          "First ¼ matches original characters exactly");
+      }
+
+      // Test with a short key (6 chars — minimum detection length)
+      const shortKey = "AKIA1234567890123456"; // 20 chars, visible = 5
+      const shortResult = PromptGodSanitizer.sanitize(shortKey);
+      if (shortResult.extracted.length > 0) {
+        const m = shortResult.extracted[0].masked;
+        t.assert(m.startsWith("AKIA1"),
+          "Short key: first ¼ visible",
+          `Masked: "${m}"`);
+      }
+
+      // Test with a long key (48 chars)
+      const longKey = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop";
+      const longResult = PromptGodSanitizer.sanitize(longKey);
+      if (longResult.extracted.length > 0) {
+        const m = longResult.extracted[0].masked;
+        const expectedVisible = longKey.substring(0, Math.ceil(longKey.length / 4));
+        t.assert(m.startsWith(expectedVisible),
+          "Long key: first ¼ visible (12 chars)",
+          `Expected prefix: "${expectedVisible}", Got: "${m.substring(0, expectedVisible.length)}"`);
+      }
+    });
+
+
+    // ─── 3. Custom-Named Keys (Entropy Detection) ───
+    runCategory("Custom-Named Keys via Entropy Detection", (t) => {
+      // User stores key with custom variable name
+      const env1 = 'MY_CUSTOM_API_KEY = "a8F3b7C9d2E1f4G5h6I7j8K9l0M1n2O3"';
+      const r1 = PromptGodSanitizer.sanitize(env1);
+      t.assert(r1.extracted.length > 0,
+        'Detects: MY_CUSTOM_API_KEY = "random_value"',
+        `Found ${r1.extracted.length} match(es), masked: "${r1.maskedText}"`);
+
+      // DB password with non-standard name
+      const env2 = 'db_connection_secret="xK9mP2nQ7rS4tU6vW8yZ1aB3cD5eF0gH"';
+      const r2 = PromptGodSanitizer.sanitize(env2);
+      t.assert(r2.extracted.length > 0,
+        'Detects: db_connection_secret="random_value"',
+        `Found ${r2.extracted.length} match(es)`);
+
+      // JSON config with custom key name
+      const json1 = '{"myServiceToken": "Xt7yR9pL2mK4nQ6wS8vU0zA1bC3dE5fG"}';
+      const r3 = PromptGodSanitizer.sanitize(json1);
+      t.assert(r3.extracted.length > 0,
+        'Detects JSON: "myServiceToken": "random_value"',
+        `Found ${r3.extracted.length} match(es)`);
+
+      // YAML-style config
+      const yaml1 = 'production_key: aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV';
+      const r4 = PromptGodSanitizer.sanitize(yaml1);
+      t.assert(r4.extracted.length > 0,
+        'Detects YAML: production_key: random_value',
+        `Found ${r4.extracted.length} match(es)`);
+
+      // export with custom name
+      const env3 = 'export INTERNAL_SERVICE_CREDENTIAL="pQ7rS4tU6vW8yZ1aB3cD5eF0gH2iJ9kL"';
+      const r5 = PromptGodSanitizer.sanitize(env3);
+      t.assert(r5.extracted.length > 0,
+        'Detects: export INTERNAL_SERVICE_CREDENTIAL="random_value"',
+        `Found ${r5.extracted.length} match(es)`);
+
+      // Single-quoted value
+      const env4 = "WEBHOOK_SECRET='mK4nQ6wS8vU0zA1bC3dE5fG7iJ9kL2pR'";
+      const r6 = PromptGodSanitizer.sanitize(env4);
+      t.assert(r6.extracted.length > 0,
+        "Detects: WEBHOOK_SECRET='random_value' (single quotes)",
+        `Found ${r6.extracted.length} match(es)`);
+    });
+
+
+    // ─── 4. Entropy Detection of Random Strings ───
+    runCategory("Entropy Detection — Random Strings", (t) => {
+      // High-entropy base64-like string
+      const b64 = "aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV";
+      t.assert(PromptGodSanitizer.isLikelySecret(b64),
+        "High-entropy base64-like string is detected",
+        `Entropy: ${PromptGodSanitizer.calculateEntropy(b64).toFixed(3)}`);
+
+      // High-entropy hex string (32+ chars)
+      const hex = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
+      t.assert(PromptGodSanitizer.isLikelySecret(hex),
+        "32-char hex string is detected as likely secret",
+        `Entropy: ${PromptGodSanitizer.calculateEntropy(hex).toFixed(3)}`);
+
+      // URL-safe base64 token
+      const urlSafe = "xK9m-P2nQ_7rS4tU-6vW8yZ_1aB3cD5eF";
+      t.assert(PromptGodSanitizer.isLikelySecret(urlSafe),
+        "URL-safe base64 token is detected",
+        `Entropy: ${PromptGodSanitizer.calculateEntropy(urlSafe).toFixed(3)}`);
+
+      // Long random alphanumeric (64 chars)
+      const long64 = "aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uVwX1yZ2aB3cD5eF0gH7iJ9kL1mN2oP";
+      t.assert(PromptGodSanitizer.isLikelySecret(long64),
+        "64-char random alphanumeric is detected",
+        `Entropy: ${PromptGodSanitizer.calculateEntropy(long64).toFixed(3)}`);
+
+      // Mixed with special key chars (+ / =)
+      const b64Full = "aB3cD5eF0g+H7iJ9kL1/mN2oP4qR6sT8=";
+      t.assert(PromptGodSanitizer.isLikelySecret(b64Full),
+        "Base64 string with +/= is detected",
+        `Entropy: ${PromptGodSanitizer.calculateEntropy(b64Full).toFixed(3)}`);
+    });
+
+
+    // ─── 5. False Positive Resistance ───
+    runCategory("False Positive Resistance", (t) => {
+      // Normal English text should NOT be masked
+      const english = "The quick brown fox jumps over the lazy dog in the afternoon";
+      const r1 = PromptGodSanitizer.sanitize(english);
+      t.assertEqual(r1.extracted.length, 0,
+        "Normal English sentence: no false positives");
+
+      // URL should NOT be masked
+      t.assert(PromptGodSanitizer.isFalsePositive("https://docs.example.com/api/v2/authentication/tokens", ""),
+        "URL is correctly identified as false positive");
+
+      // File path should NOT be masked
+      t.assert(PromptGodSanitizer.isFalsePositive("/usr/local/bin/node_modules", ""),
+        "Unix file path is correctly identified as false positive");
+
+      t.assert(PromptGodSanitizer.isFalsePositive("C:\\Users\\skyga\\Documents", ""),
+        "Windows file path is correctly identified as false positive");
+
+      // CSS hex color
+      t.assert(PromptGodSanitizer.isFalsePositive("#7c3aed", ""),
+        "CSS hex color is correctly identified as false positive");
+
+      // Semver version string
+      t.assert(PromptGodSanitizer.isFalsePositive("16.14.2-alpine3.17", ""),
+        "Semver version string is correctly identified as false positive");
+
+      // Function calls
+      t.assert(PromptGodSanitizer.isFalsePositive("document.getElementById()", ""),
+        "Function call is correctly identified as false positive");
+
+      // Repeated chars (not a real secret)
+      t.assert(PromptGodSanitizer.isFalsePositive("aaaaaaaaaaaaaaaa", ""),
+        "Repeated characters are correctly identified as false positive");
+
+      // Snake_case identifier with no digits
+      t.assert(PromptGodSanitizer.isFalsePositive("my-custom-module-name", ""),
+        "Hyphenated module name is correctly identified as false positive");
+
+      // Data URI prefix
+      t.assert(PromptGodSanitizer.isFalsePositive("data:image/png;base64,iVBOR", ""),
+        "Data URI is correctly identified as false positive");
+
+      // Integrity hash prefix
+      t.assert(PromptGodSanitizer.isFalsePositive("sha256-ABCDabcd1234567890abcdef", ""),
+        "SRI hash prefix is correctly identified as false positive");
+
+      // Low entropy strings should NOT be detected
+      const lowEntropy = "AAAAAAAAbbbbbbbb1111";
+      t.assert(!PromptGodSanitizer.isLikelySecret(lowEntropy),
+        "Low-entropy string (repeated patterns) is NOT flagged as secret",
+        `Entropy: ${PromptGodSanitizer.calculateEntropy(lowEntropy).toFixed(3)}`);
+
+      // Very short strings
+      t.assert(!PromptGodSanitizer.isLikelySecret("abc123"),
+        "Short string (6 chars) is NOT flagged as secret");
+
+      t.assert(!PromptGodSanitizer.isLikelySecret(""),
+        "Empty string is NOT flagged as secret");
+
+      // Email address
+      t.assert(PromptGodSanitizer.isFalsePositive("user.name@example.com", ""),
+        "Email address is correctly identified as false positive");
+
+      // String with spaces
+      t.assert(!PromptGodSanitizer.isLikelySecret("this has spaces in it yes"),
+        "String with spaces is NOT flagged as secret");
+    });
+
+
+    // ─── 6. Multi-line / Mixed Content ───
+    runCategory("Multi-line & Mixed Content", (t) => {
+      // .env file with mix of safe and secret values
+      const envFile = `# Database config
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=admin
+MY_SUPER_SECRET_KEY=aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV
+APP_NAME=PromptGod
+CUSTOM_AUTH_TOKEN=xK9mP2nQ7rS4tU6vW8yZ1aB3cD5eF0gH
+LOG_LEVEL=debug`;
+
+      const r1 = PromptGodSanitizer.sanitize(envFile);
+      t.assert(r1.extracted.length >= 2,
+        ".env file: detects multiple secrets among safe values",
+        `Found ${r1.extracted.length} secret(s)`);
+      t.assertIncludes(r1.maskedText, "DB_HOST=localhost",
+        ".env file: preserves safe DB_HOST value");
+      t.assertIncludes(r1.maskedText, "APP_NAME=PromptGod",
+        ".env file: preserves safe APP_NAME value");
+      t.assertIncludes(r1.maskedText, "LOG_LEVEL=debug",
+        ".env file: preserves safe LOG_LEVEL value");
+
+      // JSON config with mixed keys
+      const jsonConfig = `{
+  "appName": "MyApp",
+  "version": "2.1.0",
+  "apiSecret": "Xt7yR9pL2mK4nQ6wS8vU0zA1bC3dE5fG",
+  "debug": true,
+  "serviceToken": "pQ7rS4tU6vW8yZ1aB3cD5eF0gH2iJ9kL",
+  "region": "us-east-1"
+}`;
+
+      const r2 = PromptGodSanitizer.sanitize(jsonConfig);
+      t.assert(r2.extracted.length >= 2,
+        "JSON config: detects secrets in apiSecret and serviceToken",
+        `Found ${r2.extracted.length} secret(s)`);
+      t.assertIncludes(r2.maskedText, '"appName": "MyApp"',
+        "JSON config: preserves safe appName value");
+
+      // Code snippet with embedded key
+      const codeSnippet = `const config = {
+  timeout: 30000,
+  auth_key: "mK4nQ6wS8vU0zA1bC3dE5fG7iJ9kL2pR",
+  retries: 3,
+};`;
+
+      const r3 = PromptGodSanitizer.sanitize(codeSnippet);
+      t.assert(r3.extracted.length >= 1,
+        "Code snippet: detects secret in auth_key assignment",
+        `Found ${r3.extracted.length} secret(s)`);
+      t.assertIncludes(r3.maskedText, "timeout: 30000",
+        "Code snippet: preserves safe timeout value");
+    });
+
+
+    // ─── 7. Edge Cases ───
+    runCategory("Edge Cases", (t) => {
+      // Empty string
+      const r1 = PromptGodSanitizer.sanitize("");
+      t.assertEqual(r1.extracted.length, 0, "Empty string: no errors, no detections");
+      t.assertEqual(r1.maskedText, "", "Empty string: returns empty");
+
+      // Null/undefined
+      const r2 = PromptGodSanitizer.sanitize(null);
+      t.assertEqual(r2.maskedText, null, "Null input: returns null");
+
+      const r3 = PromptGodSanitizer.sanitize(undefined);
+      t.assertEqual(r3.maskedText, undefined, "Undefined input: returns undefined");
+
+      // Very short string (< 8 chars)
+      const r4 = PromptGodSanitizer.sanitize("hi");
+      t.assertEqual(r4.extracted.length, 0, "Very short string: skipped (perf guard)");
+
+      // String of only special characters
+      const r5 = PromptGodSanitizer.sanitize("!@#$%^&*()_+-=[]{}|;:',.<>?/~`");
+      t.assertEqual(r5.extracted.length, 0,
+        "Special characters only: no false positives");
+
+      // Already masked string (contains ****)
+      t.assert(PromptGodSanitizer.isFalsePositive("sk-ab**********************", ""),
+        "Already-masked string is identified as false positive");
+
+      // Unicode text
+      const r6 = PromptGodSanitizer.sanitize("こんにちは世界 это тестовая строка with no secrets");
+      t.assertEqual(r6.extracted.length, 0,
+        "Unicode text: no false positives");
+
+      // Key at the very start of text
+      const r7 = PromptGodSanitizer.sanitize("sk-abc123XYZ456def789ghij is my key");
+      t.assert(r7.extracted.length > 0,
+        "Key at the start of text is still detected");
+
+      // Key at the very end of text
+      const r8 = PromptGodSanitizer.sanitize("My key is sk-abc123XYZ456def789ghij");
+      t.assert(r8.extracted.length > 0,
+        "Key at the end of text is still detected");
+
+      // Multiple identical keys — should deduplicate
+      const r9 = PromptGodSanitizer.sanitize(
+        "Key1: sk-abc123XYZ456def789ghij and Key2: sk-abc123XYZ456def789ghij"
+      );
+      t.assertEqual(r9.extracted.length, 1,
+        "Duplicate keys: deduplicated to 1 detection");
+
+      // Multiple different keys
+      const r10 = PromptGodSanitizer.sanitize(
+        "OpenAI: sk-abc123XYZ456def789ghij GitHub: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
+      );
+      t.assert(r10.extracted.length >= 2,
+        "Multiple different keys: all detected",
+        `Found ${r10.extracted.length} match(es)`);
+
+      // String at exact minimum length boundary (16 chars for entropy)
+      const boundary = "aB3cD5eF0gH7iJ9k"; // 17 chars
+      const isSec = PromptGodSanitizer.isLikelySecret(boundary);
+      t.assert(typeof isSec === "boolean",
+        "Boundary-length string (17 chars): returns boolean without error");
+
+      // 16 chars — exactly at boundary
+      const exact16 = "aB3cD5eF0gH7iJ9k";
+      t.assert(typeof PromptGodSanitizer.isLikelySecret(exact16) === "boolean",
+        "Exact-minimum-length string (16 chars): returns boolean");
+    });
+
+
+    // ─── 8. Entropy Function Unit Tests ───
+    runCategory("calculateEntropy() Unit Tests", (t) => {
+      // Single character repeated
+      const e1 = PromptGodSanitizer.calculateEntropy("aaaaaaaaaa");
+      t.assertEqual(e1, 0, "Repeated single character: entropy = 0");
+
+      // Two characters equally distributed
+      const e2 = PromptGodSanitizer.calculateEntropy("abababababababab");
+      t.assert(Math.abs(e2 - 1.0) < 0.01,
+        "Two chars equally distributed: entropy ≈ 1.0",
+        `Got: ${e2.toFixed(4)}`);
+
+      // Random-looking string should have high entropy
+      const e3 = PromptGodSanitizer.calculateEntropy("aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV");
+      t.assertGreaterThan(e3, 3.5,
+        "High-randomness string: entropy > 3.5",
+        `Got: ${e3.toFixed(4)}`);
+
+      // Normal English word
+      const e4 = PromptGodSanitizer.calculateEntropy("password");
+      t.assertLessThan(e4, 3.5,
+        "Normal English word 'password': entropy < 3.5",
+        `Got: ${e4.toFixed(4)}`);
+
+      // Empty string
+      const e5 = PromptGodSanitizer.calculateEntropy("");
+      t.assertEqual(e5, 0, "Empty string: entropy = 0");
+
+      // Null
+      const e6 = PromptGodSanitizer.calculateEntropy(null);
+      t.assertEqual(e6, 0, "Null input: entropy = 0");
+
+      // All unique chars (maximum entropy for length)
+      const e7 = PromptGodSanitizer.calculateEntropy("abcdefghijklmnop");
+      t.assertGreaterThan(e7, 3.5,
+        "16 unique chars: entropy > 3.5 (high)",
+        `Got: ${e7.toFixed(4)}`);
+
+      // Hex string
+      const e8 = PromptGodSanitizer.calculateEntropy("a1b2c3d4e5f6a7b8");
+      t.assertGreaterThan(e8, 3.0,
+        "Hex-like string: entropy > 3.0",
+        `Got: ${e8.toFixed(4)}`);
+    });
+
+
+    // ═══════════════════════════════════════════════════════════════════
+    // RENDER RESULTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function renderResults() {
+      document.getElementById("total-count").textContent = results.total;
+      document.getElementById("passed-count").textContent = results.passed;
+      document.getElementById("failed-count").textContent = results.failed;
+
+      const container = document.getElementById("results");
+
+      for (const cat of results.categories) {
+        const hasFails = cat.tests.some((t) => !t.pass);
+        const passCount = cat.tests.filter((t) => t.pass).length;
+
+        let html = `
+          <div class="category">
+            <div class="category-header">
+              <h2>${cat.name}</h2>
+              <span class="category-badge ${hasFails ? "has-fail" : "all-pass"}">
+                ${passCount}/${cat.tests.length} ${hasFails ? "ISSUES" : "PASSED"}
+              </span>
+            </div>
+            <div class="category-body">
+        `;
+
+        for (const test of cat.tests) {
+          html += `
+            <div class="test-row ${test.pass ? "" : "failed"}">
+              <span class="test-icon">${test.pass ? "✅" : "❌"}</span>
+              <div class="test-name">
+                ${test.name}
+                ${test.detail && !test.pass ? `<div class="fail-detail">${escapeHtml(test.detail)}</div>` : ""}
+                ${test.detail && test.pass ? `<div class="detail">${escapeHtml(test.detail)}</div>` : ""}
+              </div>
+              <span class="test-status ${test.pass ? "pass" : "fail"}">
+                ${test.pass ? "PASS" : "FAIL"}
+              </span>
+            </div>
+          `;
+        }
+
+        html += `</div></div>`;
+        container.innerHTML += html;
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // Run!
+    const startTime = performance.now();
+    renderResults();
+    const elapsed = (performance.now() - startTime).toFixed(1);
+    document.getElementById("results").innerHTML += `<p class="run-time">Tests completed in ${elapsed}ms</p>`;
+  </script>
+</body>
+</html>

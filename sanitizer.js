@@ -429,6 +429,9 @@ const PromptGodSanitizer = (() => {
       maskedText = applyRules(contextRules, maskedText, extracted, seen);
     }
 
+    // Layer 3: Entropy-based automatic detection for unknown key formats
+    maskedText = applyEntropyDetection(maskedText, extracted, seen);
+
     return { maskedText, extracted };
   }
 
@@ -517,6 +520,289 @@ const PromptGodSanitizer = (() => {
   }
 
   // =====================================================================
+  // ENTROPY-BASED AUTOMATIC KEY DETECTION
+  // =====================================================================
+
+  /**
+   * Shannon entropy — measures randomness of a string.
+   * Normal English ≈ 2.5–3.0 bits/char, API keys ≈ 4.0–4.5 bits/char.
+   * @param {string} str
+   * @returns {number} Entropy in bits per character.
+   */
+  function calculateEntropy(str) {
+    if (!str || str.length === 0) return 0;
+
+    const freq = {};
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      freq[ch] = (freq[ch] || 0) + 1;
+    }
+
+    let entropy = 0;
+    const len = str.length;
+    for (const ch in freq) {
+      const p = freq[ch] / len;
+      if (p > 0) {
+        entropy -= p * Math.log2(p);
+      }
+    }
+    return entropy;
+  }
+
+  // Entropy threshold: strings above this are likely random/secret
+  const ENTROPY_THRESHOLD = 3.5;
+
+  // Length bounds for candidate secrets
+  const MIN_SECRET_LENGTH = 16;
+  const MAX_SECRET_LENGTH = 512;
+
+  /**
+   * Structural heuristics: does a string look like an API key/secret?
+   * Checks character composition, length, and mixed character classes.
+   * @param {string} str
+   * @returns {boolean}
+   */
+  function isLikelySecret(str) {
+    if (!str || str.length < MIN_SECRET_LENGTH || str.length > MAX_SECRET_LENGTH) return false;
+
+    // Must be primarily printable ASCII, no whitespace
+    if (/\s/.test(str)) return false;
+
+    // Count character classes
+    const hasUpper = /[A-Z]/.test(str);
+    const hasLower = /[a-z]/.test(str);
+    const hasDigit = /[0-9]/.test(str);
+    const hasSpecial = /[_\-+/=.]/.test(str);
+
+    // Must use at least 2 character classes (mixed)
+    const classCount = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length;
+    if (classCount < 2) return false;
+
+    // Check for known key character sets:
+    // - Base64-like:  [A-Za-z0-9+/=]
+    // - Hex:          [0-9a-fA-F]
+    // - URL-safe B64: [A-Za-z0-9_-]
+    // - Alphanumeric: [A-Za-z0-9]
+    const isBase64Like = /^[A-Za-z0-9+/=_\-]+$/.test(str);
+    const isHexLike = /^[0-9a-fA-F]+$/.test(str) && str.length >= 32;
+    const isAlphanumericPlus = /^[A-Za-z0-9_\-:.+/=]+$/.test(str);
+
+    if (!isBase64Like && !isHexLike && !isAlphanumericPlus) return false;
+
+    // Check entropy threshold
+    const entropy = calculateEntropy(str);
+    if (entropy < ENTROPY_THRESHOLD) return false;
+
+    return true;
+  }
+
+  /**
+   * False positive filter: exclude strings that look like secrets but aren't.
+   * @param {string} str - The candidate secret string.
+   * @param {string} context - Surrounding text for contextual checks.
+   * @returns {boolean} True if this is a false positive (should NOT be masked).
+   */
+  function isFalsePositive(str, context) {
+    // URLs (http://, https://, ftp://)
+    if (/^https?:\/\//i.test(str) || /^ftp:\/\//i.test(str)) return true;
+
+    // Email addresses
+    if (/^[^@]+@[^@]+\.[^@]+$/.test(str)) return true;
+
+    // File paths (Unix or Windows)
+    if (/^\/[a-z_]/i.test(str) || /^[A-Z]:\\/i.test(str)) return true;
+    if (/^\.\//.test(str) || /^\.\.\//.test(str)) return true;
+
+    // CSS/HTML values: hex colors (#fff, #ffffff), common CSS functions
+    if (/^#[0-9a-fA-F]{3,8}$/.test(str)) return true;
+    if (/^(rgb|hsl|rgba|hsla|url|calc|var)\(/i.test(str)) return true;
+
+    // Package versions (semver-like)
+    if (/^\d+\.\d+\.\d+/.test(str)) return true;
+
+    // Common programming identifiers / camelCase / snake_case words that are code, not secrets
+    // If it looks like a function call or method chain
+    if (/\(\)/.test(str) || /\.\w+\(/.test(str)) return true;
+
+    // Repeated character strings (aaaaaaa, 1111111, etc.)
+    if (/^(.)\1{7,}$/.test(str)) return true;
+
+    // Key=value assignments (e.g., DB_HOST=localhost, APP_NAME=PromptGod)
+    // These are config assignments, not secrets themselves
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(str)) return true;
+
+    // If the string is a common word or phrase (has too many dictionary-like patterns)
+    // Strings that are mostly lowercase alphabetic with few digits are likely prose
+    const alphaRatio = (str.match(/[a-zA-Z]/g) || []).length / str.length;
+    const digitRatio = (str.match(/[0-9]/g) || []).length / str.length;
+    // Pure lowercase words separated by hyphens/underscores are likely identifiers, not secrets
+    if (/^[a-z]+([_-][a-z]+){2,}$/.test(str) && digitRatio === 0) return true;
+
+    // ALL-UPPERCASE snake_case identifiers are ENV variable names, not secret values
+    // e.g., OAUTH_ENCRYPTION_KEY, STRIPE_WEBHOOK_SECRET, AWS_DEFAULT_REGION
+    // Requires at least one underscore to avoid catching uppercase secrets like AKIA...
+    if (/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(str)) return true;
+
+    // CamelCase or PascalCase identifiers (programming variable names, not secrets)
+    // e.g., PromptGodSanitizer, getElementById, myCustomFunction
+    if (/^[a-z][a-zA-Z0-9]*$/.test(str) && digitRatio < 0.3 && str.length < 30) return true;
+    if (/^[A-Z][a-zA-Z0-9]*$/.test(str) && digitRatio < 0.3 && str.length < 30) return true;
+
+    // If already contains stars (already masked by a previous rule)
+    if (/\*{4,}/.test(str)) return true;
+
+    // JSON structural tokens
+    if (/^[{}\[\]:,]+$/.test(str)) return true;
+
+    // Commonly seen safe long strings that aren't secrets
+    const safePrefixes = [
+      "data:image/",
+      "data:application/",
+      "sha256-",
+      "sha384-",
+      "sha512-",
+      "integrity=",
+    ];
+    if (safePrefixes.some((p) => str.startsWith(p))) return true;
+
+    return false;
+  }
+
+  /**
+   * Extract candidate secret values from text using generic key-value patterns
+   * and standalone high-entropy token detection.
+   * @param {string} text
+   * @returns {Array<{value: string, start: number, context: string}>}
+   */
+  function extractCandidates(text) {
+    const candidates = [];
+    const candidateValues = new Set();
+
+    // ─── Pattern A: Key-value assignments ───
+    // Matches: KEY = "value", KEY=value, "key": "value", key: value
+    const kvPatterns = [
+      // ENV style: KEY=value or KEY="value" or KEY='value'
+      /(?:^|[\s;,])(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*["']?([^\s"'#;,}{\]\)]+)["']?/gm,
+      // JSON style: "key": "value" or 'key': 'value'
+      /["']([A-Za-z_][A-Za-z0-9_]*)["']\s*:\s*["']([^"']+)["']/g,
+      // YAML style: key: value (unquoted)
+      /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\s#][^\n#]*)/gm,
+    ];
+
+    for (const pattern of kvPatterns) {
+      const regex = new RegExp(pattern.source, pattern.flags);
+      let match;
+      let iterations = 0;
+
+      while ((match = regex.exec(text)) !== null && iterations < 500) {
+        iterations++;
+        const value = (match[2] || "").trim();
+
+        if (value && !candidateValues.has(value) && value.length >= MIN_SECRET_LENGTH) {
+          candidateValues.add(value);
+          candidates.push({
+            value,
+            start: match.index,
+            context: text.substring(
+              Math.max(0, match.index - 20),
+              Math.min(text.length, match.index + match[0].length + 20)
+            ),
+          });
+        }
+      }
+    }
+
+    // ─── Pattern B: Standalone high-entropy tokens ───
+    // Match long alphanumeric+special tokens not already caught by key-value patterns
+    // Note: `=` is excluded from the token charset — it's a delimiter, not part of secrets
+    const tokenRegex = /(?:^|[\s"'=:,;({\[])([A-Za-z0-9_\-+/.]{16,256})(?=[\s"',;:=)}\]#]|$)/gm;
+    let tokenMatch;
+    let tokenIterations = 0;
+
+    while ((tokenMatch = tokenRegex.exec(text)) !== null && tokenIterations < 500) {
+      tokenIterations++;
+      const token = (tokenMatch[1] || "").trim();
+
+      if (token && !candidateValues.has(token) && token.length >= MIN_SECRET_LENGTH) {
+        candidateValues.add(token);
+        candidates.push({
+          value: token,
+          start: tokenMatch.index,
+          context: text.substring(
+            Math.max(0, tokenMatch.index - 20),
+            Math.min(text.length, tokenMatch.index + tokenMatch[0].length + 20)
+          ),
+        });
+      }
+    }
+
+    return candidates;
+  }
+
+  /**
+   * Detect unknown secrets via entropy analysis.
+   * Returns an array of detected secret objects.
+   * @param {string} text
+   * @returns {Array<{value: string, entropy: number}>}
+   */
+  function detectUnknownSecrets(text) {
+    if (!text || text.length < MIN_SECRET_LENGTH) return [];
+
+    const candidates = extractCandidates(text);
+    const secrets = [];
+
+    for (const candidate of candidates) {
+      const { value, context } = candidate;
+
+      // Run false positive filter
+      if (isFalsePositive(value, context)) continue;
+
+      // Run structural + entropy check
+      if (isLikelySecret(value)) {
+        secrets.push({
+          value,
+          entropy: calculateEntropy(value),
+        });
+      }
+    }
+
+    return secrets;
+  }
+
+  /**
+   * Apply entropy-based detection and mask any newly found secrets.
+   * Integrates with the main sanitize() pipeline.
+   */
+  function applyEntropyDetection(maskedText, extracted, seen) {
+    const secrets = detectUnknownSecrets(maskedText);
+
+    for (const secret of secrets) {
+      const { value } = secret;
+
+      // Skip if already caught by regex rules
+      if (seen.has(value)) continue;
+
+      // Apply partial masking: show first 1/4, star remaining 3/4
+      const visibleLen = Math.ceil(value.length / 4);
+      const visiblePart = value.substring(0, visibleLen);
+      const starredLen = value.length - visibleLen;
+      const stars = visiblePart + "*".repeat(Math.min(starredLen, 32));
+
+      maskedText = maskedText.replace(value, stars);
+      seen.add(value);
+
+      extracted.push({
+        rule: "Entropy Detection (Auto)",
+        original: value,
+        masked: stars,
+        description: `High-entropy string detected (${secret.entropy.toFixed(2)} bits/char)`,
+      });
+    }
+
+    return maskedText;
+  }
+
+  // =====================================================================
   // PUBLIC API
   // =====================================================================
 
@@ -561,6 +847,11 @@ const PromptGodSanitizer = (() => {
     sanitize,
     getRuleNames,
     buildCustomRules,
+    // Exposed for testing
+    calculateEntropy,
+    detectUnknownSecrets,
+    isLikelySecret,
+    isFalsePositive,
   };
 })();
 

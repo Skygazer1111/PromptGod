@@ -100,7 +100,48 @@ t(
   "Named secret hash values still masked"
 );
 
-console.log("\n=== 7. Multi-line / Mixed Content ===");
+console.log("\n=== 7. Infrastructure & Structural Preservation ===");
+
+// K8s manifest — apiVersion must survive
+const k8sManifest = `apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app-ingress`;
+const k8r = S.sanitize(k8sManifest);
+t(k8r.extracted.length === 0, "K8s apiVersion networking.k8s.io/v1 preserved");
+t(k8r.maskedText === k8sManifest, "K8s manifest text unchanged");
+
+t(S.isFalsePositive("networking.k8s.io/v1", ""), "networking.k8s.io/v1 is false positive");
+t(S.isFalsePositive("rbac.authorization.k8s.io/v1beta1", ""), "K8s RBAC API group is false positive");
+t(S.isFalsePositive("ingress-nginx-controller", ""), "Hyphenated resource name is false positive");
+t(S.isFalsePositive("cert-manager-webhook", ""), "cert-manager-webhook is false positive");
+t(S.isFalsePositive("deployment.yaml", ""), "YAML filename is false positive");
+t(S.isFalsePositive("config-map.json", ""), "JSON filename is false positive");
+t(S.isFalsePositive("encryption_key_v2", ""), "Lowercase underscore identifier is false positive");
+t(!S.isLikelySecret("networking.k8s.io/v1"), "networking.k8s.io/v1 not a secret");
+t(!S.isLikelySecret("encryption_key_v2"), "encryption_key_v2 not a secret");
+
+// JSON structural integrity — key names must never be masked
+const jsonStruct = `{
+  "encryption_key_v2": "aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV",
+  "sentry_dsn": "https://example.ingest.sentry.io/0000",
+  "debug": true
+}`;
+const jsr = S.sanitize(jsonStruct);
+t(jsr.maskedText.includes('"encryption_key_v2":'), "JSON key encryption_key_v2 preserved");
+t(jsr.maskedText.includes('"sentry_dsn":'), "JSON key sentry_dsn preserved");
+t(jsr.maskedText.includes('"debug": true'), "JSON trailing field preserved");
+t(jsr.maskedText.split('\n').length === jsonStruct.split('\n').length, "JSON line count preserved");
+
+// Star length must equal original length (no structural shift)
+const longSecret = "aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uVwXyZ0123456789ab";
+const longResult = S.sanitize('SECRET_KEY=' + longSecret);
+if (longResult.extracted.length > 0) {
+  const masked = longResult.extracted[0].masked;
+  t(masked.length === longSecret.length, "Star mask preserves exact original length (" + longSecret.length + " chars)");
+}
+
+console.log("\n=== 8. Multi-line / Mixed Content ===");
 const envFile = `# Database config
 DB_HOST=localhost
 DB_PORT=5432
@@ -165,7 +206,7 @@ t(rr.maskedText.includes("S3_BUCKET_NAME="), "Real .env: S3_BUCKET_NAME name pre
 t(rr.maskedText.includes("APP_ENV=production"), "Real .env: safe APP_ENV preserved");
 t(rr.maskedText.includes("DB_POOL_MAX=20"), "Real .env: safe DB_POOL_MAX preserved");
 
-console.log("\n=== 8. Edge Cases ===");
+console.log("\n=== 9. Edge Cases ===");
 t(S.sanitize("").extracted.length === 0, "Empty string: no errors");
 t(S.sanitize(null).maskedText === null, "Null returns null");
 t(S.sanitize(undefined).maskedText === undefined, "Undefined returns undefined");
@@ -175,7 +216,7 @@ t(S.sanitize("sk-abc123XYZ456def789ghij is my key").extracted.length > 0, "Key a
 t(S.sanitize("My key is sk-abc123XYZ456def789ghij").extracted.length > 0, "Key at end detected");
 t(S.sanitize("Key1: sk-abc123XYZ456def789ghij and Key2: sk-abc123XYZ456def789ghij").extracted.length === 1, "Duplicate keys deduplicated");
 
-console.log("\n=== 9. Entropy Function ===");
+console.log("\n=== 10. Entropy Function ===");
 t(S.calculateEntropy("aaaaaaaaaa") === 0, "Repeated char: entropy = 0");
 t(Math.abs(S.calculateEntropy("abababababababab") - 1.0) < 0.01, "Two chars: entropy ≈ 1.0");
 t(S.calculateEntropy("aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV") > 3.5, "Random string: entropy > 3.5");

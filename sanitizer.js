@@ -492,11 +492,11 @@ const PromptGodSanitizer = (() => {
         const matchContext = getMatchContext(maskedText, match.index, fullMatch.length);
         if (isFalsePositive(sensitiveValue, matchContext)) continue;
 
-        // Show first 1/4 of the key, star the remaining 3/4
+        // Show first 1/4 of the key, star the remaining 3/4 (preserving exact length)
         const visibleLen = Math.ceil(sensitiveValue.length / 4);
         const visiblePart = sensitiveValue.substring(0, visibleLen);
         const starredLen = sensitiveValue.length - visibleLen;
-        const stars = visiblePart + "*".repeat(Math.min(starredLen, 32));
+        const stars = visiblePart + "*".repeat(starredLen);
 
         replacements.push({ fullMatch, sensitiveValue, stars, captureGroup: rule.captureGroup });
         seen.add(sensitiveValue);
@@ -605,6 +605,15 @@ const PromptGodSanitizer = (() => {
       return false;
     }
 
+    // Dotted domain/namespace paths are infrastructure identifiers, not secrets
+    // e.g. networking.k8s.io/v1, apps.kubernetes.io, rbac.authorization.k8s.io/v1beta1
+    // Must be all-lowercase to avoid matching API keys like SG.xxx.yyy (SendGrid)
+    if (/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+/.test(clean)) return false;
+
+    // Underscore-separated lowercase identifiers are code/config names, not secret values
+    // e.g. encryption_key_v2, database_connection_string, app_secret_key
+    if (/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(clean)) return false;
+
     // Must be primarily printable ASCII, no whitespace
     if (/\s/.test(str)) return false;
 
@@ -685,11 +694,37 @@ const PromptGodSanitizer = (() => {
 
     // ─── URLs & repository paths ───
     if (/^https?:\/\//i.test(cleanStr) || /^ftp:\/\//i.test(cleanStr)) return true;
-    // Protocol-relative URLs (e.g. //github.com/... after https: is stripped by tokenizers)
     if (/^\/\/[a-z0-9][a-z0-9.-]*\//i.test(cleanStr)) return true;
     if (/^(?:www\.)?(?:github|gitlab|bitbucket)\.com\//i.test(cleanStr)) return true;
     if (/^git@[\w.-]+:/i.test(cleanStr)) return true;
     if (/\.git$/i.test(cleanStr) && /[/.]/.test(cleanStr)) return true;
+
+    // ─── Infrastructure domain identifiers ───
+    // Kubernetes API groups, cloud provider namespaces, dotted package paths
+    // e.g. networking.k8s.io/v1, apps.kubernetes.io, rbac.authorization.k8s.io/v1beta1
+    // Must be all-lowercase to avoid matching API keys like SG.xxx.yyy (SendGrid)
+    if (/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+(\/(v\d+[a-z0-9]*|[a-z][a-z0-9._-]*))*$/.test(cleanStr)) {
+      return true;
+    }
+
+    // Hyphenated lowercase resource names (Kubernetes resources, Docker images, CLI tools)
+    // e.g. ingress-nginx-controller, cert-manager, kube-system
+    if (/^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)+$/.test(cleanStr)) return true;
+
+    // Underscore-separated lowercase identifiers (config keys, field names)
+    // e.g. encryption_key_v2, database_url, app_secret_key
+    if (/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(cleanStr)) return true;
+
+    // File names with common extensions
+    if (/\.(ya?ml|json|toml|ini|cfg|conf|xml|html?|css|jsx?|tsx?|py|rb|go|rs|sh|bat|ps1|md|txt|log|env)$/i.test(cleanStr)) {
+      return true;
+    }
+
+    // JSON/YAML property key context — candidate is followed by ": (key position)
+    if (ctx && cleanStr.length < 60) {
+      const afterCandidate = ctx.substring(ctx.indexOf(cleanStr) + cleanStr.length);
+      if (/^["']?\s*:\s/.test(afterCandidate)) return true;
+    }
 
     // Email addresses
     if (/^[^@]+@[^@]+\.[^@]+$/.test(cleanStr)) return true;
@@ -800,6 +835,11 @@ const PromptGodSanitizer = (() => {
       tokenIterations++;
       const token = (tokenMatch[1] || "").trim();
 
+      // Skip tokens in JSON/YAML key position (followed by optional quote then colon)
+      const afterPos = tokenMatch.index + tokenMatch[0].length;
+      const afterStr = text.substring(afterPos, Math.min(text.length, afterPos + 5));
+      if (/^["']?\s*:/.test(afterStr)) continue;
+
       if (token && !candidateValues.has(token) && token.length >= MIN_SECRET_LENGTH) {
         candidateValues.add(token);
         candidates.push({
@@ -859,11 +899,11 @@ const PromptGodSanitizer = (() => {
       // Skip if already caught by regex rules
       if (seen.has(value)) continue;
 
-      // Apply partial masking: show first 1/4, star remaining 3/4
+      // Apply partial masking: show first 1/4, star remaining 3/4 (preserving exact length)
       const visibleLen = Math.ceil(value.length / 4);
       const visiblePart = value.substring(0, visibleLen);
       const starredLen = value.length - visibleLen;
-      const stars = visiblePart + "*".repeat(Math.min(starredLen, 32));
+      const stars = visiblePart + "*".repeat(starredLen);
 
       maskedText = maskedText.replace(value, stars);
       seen.add(value);

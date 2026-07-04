@@ -14,32 +14,59 @@
   let isEnabled = true;
   let cachedCustomRules = []; // Compiled custom rules from storage
 
+  /**
+   * Check if the extension context is still valid.
+   * After an extension reload/update, old content scripts remain on the page
+   * but chrome.runtime becomes disconnected — calling any chrome.* API throws
+   * "Extension context invalidated". This guard prevents that.
+   */
+  function isExtensionContextValid() {
+    try {
+      return !!(
+        typeof chrome !== "undefined" &&
+        chrome.runtime &&
+        chrome.runtime.id
+      );
+    } catch {
+      return false;
+    }
+  }
+
   // ---------------------------------------------------------------
   // 1. Check if the extension is enabled & load custom rules
   // ---------------------------------------------------------------
   function checkEnabled() {
-    if (typeof chrome !== "undefined" && chrome.storage) {
+    if (!isExtensionContextValid()) return;
+    try {
       chrome.storage.local.get(["enabled", "customRules"], (data) => {
+        if (chrome.runtime.lastError) return;
         isEnabled = data.enabled !== false; // default to true
         cachedCustomRules = PromptGodSanitizer.buildCustomRules(data.customRules || []);
         console.log(`${LOG_PREFIX} Loaded ${cachedCustomRules.length} custom rule(s).`);
       });
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} Extension context lost, skipping checkEnabled.`);
     }
   }
   checkEnabled();
 
   // Listen for toggle changes and custom rule updates from popup / options
-  if (typeof chrome !== "undefined" && chrome.storage) {
-    chrome.storage.onChanged.addListener((changes) => {
-      if (changes.enabled) {
-        isEnabled = changes.enabled.newValue;
-        console.log(`${LOG_PREFIX} Extension ${isEnabled ? "enabled" : "disabled"}.`);
-      }
-      if (changes.customRules) {
-        cachedCustomRules = PromptGodSanitizer.buildCustomRules(changes.customRules.newValue || []);
-        console.log(`${LOG_PREFIX} Custom rules updated (${cachedCustomRules.length} rules).`);
-      }
-    });
+  if (isExtensionContextValid()) {
+    try {
+      chrome.storage.onChanged.addListener((changes) => {
+        if (!isExtensionContextValid()) return;
+        if (changes.enabled) {
+          isEnabled = changes.enabled.newValue;
+          console.log(`${LOG_PREFIX} Extension ${isEnabled ? "enabled" : "disabled"}.`);
+        }
+        if (changes.customRules) {
+          cachedCustomRules = PromptGodSanitizer.buildCustomRules(changes.customRules.newValue || []);
+          console.log(`${LOG_PREFIX} Custom rules updated (${cachedCustomRules.length} rules).`);
+        }
+      });
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} Extension context lost, skipping storage listener.`);
+    }
   }
 
   // ---------------------------------------------------------------
@@ -372,8 +399,8 @@
    * (The Vault) can display them.
    */
   function saveToVault(extractedItems) {
-    if (typeof chrome === "undefined" || !chrome.storage) {
-      console.log(`${LOG_PREFIX} Storage not available, skipping vault save.`);
+    if (!isExtensionContextValid()) {
+      console.warn(`${LOG_PREFIX} Extension context invalidated, skipping vault save.`);
       return;
     }
 
@@ -388,17 +415,23 @@
       })),
     };
 
-    chrome.storage.local.get("vault", (data) => {
-      const vault = data.vault || [];
-      vault.unshift(entry); // newest first
+    try {
+      chrome.storage.local.get("vault", (data) => {
+        if (chrome.runtime.lastError) return;
+        const vault = data.vault || [];
+        vault.unshift(entry); // newest first
 
-      // Keep only the last 100 entries to avoid storage bloat
-      if (vault.length > 100) vault.length = 100;
+        // Keep only the last 100 entries to avoid storage bloat
+        if (vault.length > 100) vault.length = 100;
 
-      chrome.storage.local.set({ vault }, () => {
-        console.log(`${LOG_PREFIX} Saved ${entry.items.length} item(s) to the Vault.`);
+        chrome.storage.local.set({ vault }, () => {
+          if (chrome.runtime.lastError) return;
+          console.log(`${LOG_PREFIX} Saved ${entry.items.length} item(s) to the Vault.`);
+        });
       });
-    });
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} Extension context lost, vault save skipped.`);
+    }
   }
 
   // ---------------------------------------------------------------

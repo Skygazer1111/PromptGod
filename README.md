@@ -11,6 +11,8 @@ Developers paste code, `.env` files, and logs into ChatGPT, Gemini, Copilot, etc
 ## Features
 
 - **Auto-mask on paste** — Intercepts paste events and masks secrets automatically
+- **Smart Entropy Engine** — Automatically detects unknown secrets and API keys using Shannon entropy analysis, even without matching regexes
+- **Partial Redaction** — Masks the last 3/4ths of a secret while leaving the prefix visible, so you know which key was redacted
 - **The Vault** — Click the extension icon to see all redacted secrets with copy buttons
 - **Manual Sanitize** — Floating 🛡️ button to scan typed text on-demand
 - **Custom Rules** — Add your own regex patterns or keywords via Settings
@@ -35,13 +37,25 @@ ChatGPT · Gemini · Claude · Grok · Microsoft Copilot · Bing Chat · Perplex
 ```
 PromptGod/
 ├── manifest.json       # Extension config (Manifest V3)
-├── sanitizer.js        # Regex detection engine (50+ rules)
+├── sanitizer.js        # Regex & Entropy detection engine
+├── test-runner.js      # CLI test runner for sanitizer validation
+├── test-sanitizer.html # Browser-based test suite UI
 ├── content.js          # Paste interceptor + sanitize button
 ├── background.js       # Service worker
 ├── popup/              # The Vault UI
 ├── options/            # Custom rules settings page
 └── icons/              # Extension icons
 ```
+
+## Testing
+
+PromptGod's detection engine comes with a comprehensive test suite covering 70+ test cases including false positives, custom keys, partial masking, and multi-line parsing.
+
+To run the test suite via Node.js:
+```bash
+node test-runner.js
+```
+Alternatively, you can open `test-sanitizer.html` in your browser (served locally) for a visual testing dashboard.
 
 ## Tech
 

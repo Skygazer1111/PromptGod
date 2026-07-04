@@ -42,6 +42,7 @@ const PromptGodSanitizer = (() => {
       name: "Google Cloud Service Account",
       regex: /("private_key"\s*:\s*"-----BEGIN[^"]+-----")/g,
       description: "Google Cloud Service Account private key in JSON",
+      multiline: true,
     },
     {
       name: "Azure Storage Key",
@@ -299,11 +300,13 @@ const PromptGodSanitizer = (() => {
       name: "Private Key Block",
       regex: /(-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----)/g,
       description: "PEM/PGP Private Key",
+      multiline: true,
     },
     {
       name: "SSH Private Key",
       regex: /(-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----)/g,
       description: "OpenSSH Private Key",
+      multiline: true,
     },
 
     // ─────────────────────────────────────────────────────────────────
@@ -364,7 +367,7 @@ const PromptGodSanitizer = (() => {
     },
     {
       name: "Password in URL",
-      regex: /:\/\/([^:]+):([^@]+)@/g,
+      regex: /:\/\/([^:\s]+):([^@\s\n]+)@/g,
       description: "Credentials embedded in a URL",
       captureGroup: 2,
     },
@@ -401,9 +404,12 @@ const PromptGodSanitizer = (() => {
     },
   ];
 
-  // Pre-partition rules once at load time (avoids per-paste array filtering)
-  const NON_CONTEXT_RULES = DEFAULT_RULES.filter((r) => !r.contextRequired);
-  const CONTEXT_RULES = DEFAULT_RULES.filter((r) => r.contextRequired);
+  // Pre-partition rules once at load time into 3 tiers:
+  // 1. MULTILINE — PEM/RSA blocks that legitimately span lines (run on full text)
+  // 2. LINE_RULES — everything else (run per-line to prevent cross-line chomps)
+  const MULTILINE_RULES = DEFAULT_RULES.filter((r) => r.multiline);
+  const LINE_RULES_NON_CONTEXT = DEFAULT_RULES.filter((r) => !r.multiline && !r.contextRequired);
+  const LINE_RULES_CONTEXT = DEFAULT_RULES.filter((r) => !r.multiline && r.contextRequired);
 
   // Fast pre-scan: skip full regex pipeline on obviously safe text (e.g. plain prose)
   const SECRET_HINT_RE =
@@ -440,26 +446,41 @@ const PromptGodSanitizer = (() => {
       return { maskedText: text, extracted: [] };
     }
 
-    const allRules = customRules.length > 0 ? [...NON_CONTEXT_RULES, ...customRules] : NON_CONTEXT_RULES;
     const extracted = [];
     let maskedText = text;
-    const seen = new Set(); // Deduplicate matched values
+    const seen = new Set();
     const isCodeOrConfig = looksLikeCodeOrConfig(text);
 
-    maskedText = applyRules(allRules, maskedText, extracted, seen);
-
-    // Context-gated rules: only run if text looks like code/config
-    if (isCodeOrConfig) {
-      maskedText = applyRules(CONTEXT_RULES, maskedText, extracted, seen);
+    // ── Phase 1: Multiline rules on full text (PEM/RSA blocks only) ──
+    // These are the ONLY rules allowed to match across line boundaries.
+    if (MULTILINE_RULES.length > 0) {
+      maskedText = applyRules(MULTILINE_RULES, maskedText, extracted, seen);
     }
 
-    // Entropy pass is expensive — only for config-like text or when regex already matched
+    // ── Phase 2: Line-isolated processing ──
+    // Every other rule runs per-line. This prevents any regex from
+    // consuming structural characters (quotes, braces, newlines) across
+    // line boundaries — the root cause of JSON/YAML structure corruption.
+    const lineRules = customRules.length > 0
+      ? [...LINE_RULES_NON_CONTEXT, ...customRules]
+      : LINE_RULES_NON_CONTEXT;
+    const contextRules = isCodeOrConfig ? LINE_RULES_CONTEXT : [];
     const runEntropy =
       text.length <= MAX_ENTROPY_CHARS &&
-      (isCodeOrConfig || extracted.length > 0 || LONG_TOKEN_RE.test(text));
-    if (runEntropy) {
-      maskedText = applyEntropyDetection(maskedText, extracted, seen);
-    }
+      (isCodeOrConfig || LONG_TOKEN_RE.test(text));
+
+    const lines = maskedText.split("\n");
+    maskedText = lines.map((line) => {
+      if (line.length < 6) return line;
+      let processed = applyRules(lineRules, line, extracted, seen);
+      if (contextRules.length > 0) {
+        processed = applyRules(contextRules, processed, extracted, seen);
+      }
+      if (runEntropy || extracted.length > 0) {
+        processed = applyEntropyDetection(processed, extracted, seen);
+      }
+      return processed;
+    }).join("\n");
 
     return { maskedText, extracted };
   }

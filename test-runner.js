@@ -141,6 +141,31 @@ if (longResult.extracted.length > 0) {
   t(masked.length === longSecret.length, "Star mask preserves exact original length (" + longSecret.length + " chars)");
 }
 
+// Heavy nested JSON — the former cross-line chomp scenario
+const heavyJson = `{
+  "app": {
+    "encryption_key_v2": "xK9mP2nQ7rS4tU6vW8yZ1aB3cD5eF0gHiJ9kL2pRmN4oT6q",
+    "signing_secret": "pQ7rS4tU6vW8yZ1aB3cD5eF0gH2iJ9kL"
+  },
+  "monitoring": {
+    "sentry_dsn": "https://abcdef1234567890abcdef1234567890@o555555.ingest.sentry.io/1234567",
+    "datadog_api_key": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+  },
+  "database": {
+    "connection_string": "postgresql://admin:P%40ssw0rd2026!@db-prod-01.internal.net:5432/payments",
+    "pool_size": 25
+  }
+}`;
+const hjr = S.sanitize(heavyJson);
+t(heavyJson.split("\n").length === hjr.maskedText.split("\n").length, "Heavy JSON: line count preserved");
+t(hjr.maskedText.includes('"encryption_key_v2":'), "Heavy JSON: encryption key name intact");
+t(hjr.maskedText.includes('"sentry_dsn":'), "Heavy JSON: sentry_dsn key intact");
+t(hjr.maskedText.includes('"datadog_api_key":'), "Heavy JSON: datadog key name intact");
+t(hjr.maskedText.includes('"connection_string":'), "Heavy JSON: connection_string key intact");
+t(hjr.maskedText.includes('"pool_size": 25'), "Heavy JSON: pool_size value preserved");
+t((hjr.maskedText.match(/\}/g) || []).length === (heavyJson.match(/\}/g) || []).length, "Heavy JSON: all closing braces preserved");
+t(hjr.extracted.length >= 3, "Heavy JSON: secrets still detected (" + hjr.extracted.length + ")");
+
 console.log("\n=== 8. Multi-line / Mixed Content ===");
 const envFile = `# Database config
 DB_HOST=localhost

@@ -457,7 +457,11 @@ const PromptGodSanitizer = (() => {
         // Skip very short matches (likely false positives)
         if (sensitiveValue.length < 6) continue;
 
-        const stars = "*".repeat(Math.min(sensitiveValue.length, 32));
+        // Show first 1/4 of the key, star the remaining 3/4
+        const visibleLen = Math.ceil(sensitiveValue.length / 4);
+        const visiblePart = sensitiveValue.substring(0, visibleLen);
+        const starredLen = sensitiveValue.length - visibleLen;
+        const stars = visiblePart + "*".repeat(Math.min(starredLen, 32));
 
         replacements.push({ fullMatch, sensitiveValue, stars, captureGroup: rule.captureGroup });
         seen.add(sensitiveValue);

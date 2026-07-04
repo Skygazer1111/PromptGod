@@ -401,6 +401,18 @@ const PromptGodSanitizer = (() => {
     },
   ];
 
+  // Pre-partition rules once at load time (avoids per-paste array filtering)
+  const NON_CONTEXT_RULES = DEFAULT_RULES.filter((r) => !r.contextRequired);
+  const CONTEXT_RULES = DEFAULT_RULES.filter((r) => r.contextRequired);
+
+  // Fast pre-scan: skip full regex pipeline on obviously safe text (e.g. plain prose)
+  const SECRET_HINT_RE =
+    /(?:sk-(?:ant-)?|AKIA[0-9A-Z]|ghp_|gho_|ghu_|ghs_|github_pat_|glpat-|hf_|npm_|pypi-|xox[bprs]-|Bearer\s|eyJ[A-Za-z0-9_-]{10,}\.|-----BEGIN|AIza[A-Za-z0-9_-]|GOCSPX-|SG\.|key-[A-Za-z0-9]|dop_v1_|sq0atp-|r8_|pk_(?:live_|test_)|sk_(?:live_|test_)|hooks\.slack|whsec_|mongodb(?:\+srv)?:|postgres(?:ql)?:|mysql:|redis:|:\/\/[^:]+:[^@]+@|[A-Z_]{2,}(?:SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|API_KEY|AUTH|CREDENTIAL|ACCESS)[A-Z_]*\s*=)/i;
+  const LONG_TOKEN_RE = /[A-Za-z0-9_\-+/=]{20,}/;
+
+  // Skip expensive entropy pass on very large pastes (regex rules still run)
+  const MAX_ENTROPY_CHARS = 500_000;
+
   // =====================================================================
   // SANITIZE — Main detection + masking function
   // =====================================================================
@@ -412,25 +424,42 @@ const PromptGodSanitizer = (() => {
    * @param {Array} customRules - Optional array of additional rules.
    * @returns {{ maskedText: string, extracted: Array }}
    */
+  function mightContainSecrets(text) {
+    if (!text || text.length < 8) return false;
+    if (SECRET_HINT_RE.test(text)) return true;
+    if (text.length >= 16 && LONG_TOKEN_RE.test(text)) return true;
+    return false;
+  }
+
   function sanitize(text, customRules = []) {
     // Performance guard: skip very short strings
     if (!text || text.length < 8) return { maskedText: text, extracted: [] };
 
-    const allRules = [...DEFAULT_RULES.filter((r) => !r.contextRequired), ...customRules];
+    // Fast exit for plain prose / UI text with no secret-like patterns
+    if (customRules.length === 0 && !mightContainSecrets(text)) {
+      return { maskedText: text, extracted: [] };
+    }
+
+    const allRules = customRules.length > 0 ? [...NON_CONTEXT_RULES, ...customRules] : NON_CONTEXT_RULES;
     const extracted = [];
     let maskedText = text;
     const seen = new Set(); // Deduplicate matched values
+    const isCodeOrConfig = looksLikeCodeOrConfig(text);
 
     maskedText = applyRules(allRules, maskedText, extracted, seen);
 
     // Context-gated rules: only run if text looks like code/config
-    if (looksLikeCodeOrConfig(text)) {
-      const contextRules = DEFAULT_RULES.filter((r) => r.contextRequired);
-      maskedText = applyRules(contextRules, maskedText, extracted, seen);
+    if (isCodeOrConfig) {
+      maskedText = applyRules(CONTEXT_RULES, maskedText, extracted, seen);
     }
 
-    // Layer 3: Entropy-based automatic detection for unknown key formats
-    maskedText = applyEntropyDetection(maskedText, extracted, seen);
+    // Entropy pass is expensive — only for config-like text or when regex already matched
+    const runEntropy =
+      text.length <= MAX_ENTROPY_CHARS &&
+      (isCodeOrConfig || extracted.length > 0 || LONG_TOKEN_RE.test(text));
+    if (runEntropy) {
+      maskedText = applyEntropyDetection(maskedText, extracted, seen);
+    }
 
     return { maskedText, extracted };
   }
@@ -440,8 +469,8 @@ const PromptGodSanitizer = (() => {
    */
   function applyRules(rules, maskedText, extracted, seen) {
     for (const rule of rules) {
-      // Clone regex to avoid lastIndex mutation
-      const regex = new RegExp(rule.regex.source, rule.regex.flags);
+      const regex = rule.regex;
+      regex.lastIndex = 0;
       const captureGroup = rule.captureGroup || 1;
 
       let match;

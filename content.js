@@ -11,6 +11,7 @@
   "use strict";
 
   const LOG_PREFIX = "[PromptGod]";
+  const DEBUG = false; // Set true only when debugging — avoids console overhead on every paste
   let isEnabled = true;
   let cachedCustomRules = []; // Compiled custom rules from storage
 
@@ -42,7 +43,7 @@
         if (chrome.runtime.lastError) return;
         isEnabled = data.enabled !== false; // default to true
         cachedCustomRules = PromptGodSanitizer.buildCustomRules(data.customRules || []);
-        console.log(`${LOG_PREFIX} Loaded ${cachedCustomRules.length} custom rule(s).`);
+        if (DEBUG) console.log(`${LOG_PREFIX} Loaded ${cachedCustomRules.length} custom rule(s).`);
       });
     } catch (e) {
       console.warn(`${LOG_PREFIX} Extension context lost, skipping checkEnabled.`);
@@ -57,11 +58,11 @@
         if (!isExtensionContextValid()) return;
         if (changes.enabled) {
           isEnabled = changes.enabled.newValue;
-          console.log(`${LOG_PREFIX} Extension ${isEnabled ? "enabled" : "disabled"}.`);
+          if (DEBUG) console.log(`${LOG_PREFIX} Extension ${isEnabled ? "enabled" : "disabled"}.`);
         }
         if (changes.customRules) {
           cachedCustomRules = PromptGodSanitizer.buildCustomRules(changes.customRules.newValue || []);
-          console.log(`${LOG_PREFIX} Custom rules updated (${cachedCustomRules.length} rules).`);
+          if (DEBUG) console.log(`${LOG_PREFIX} Custom rules updated (${cachedCustomRules.length} rules).`);
         }
       });
     } catch (e) {
@@ -180,6 +181,14 @@
     return ['div[contenteditable="true"]', 'div[role="textbox"]', "textarea"];
   }
 
+  // Resolved once per page load — avoids repeated hostname scans
+  const cachedSelectors = getSelectorsForCurrentSite();
+  const cachedSelectorString = cachedSelectors.join(", ");
+
+  // Editable elements only — fast reject before compound selector walk
+  const EDITABLE_SELECTOR =
+    'textarea, input[type="text"], input:not([type]), [contenteditable="true"], [role="textbox"]';
+
   // ---------------------------------------------------------------
   // 3. Paste Interception
   // ---------------------------------------------------------------
@@ -191,57 +200,35 @@
   function handlePaste(event) {
     if (!isEnabled) return;
 
-    // Only act if the paste target is (or is inside) a chat input
     const target = event.target;
-    if (!isChatInput(target)) return;
+    if (!target || target.nodeType !== Node.ELEMENT_NODE) return;
 
-    // Get the plain text from the clipboard
+    // Fast reject: most pastes on the page are not in chat inputs
+    if (!target.closest(EDITABLE_SELECTOR)) return;
+    if (!target.closest(cachedSelectorString)) return;
+
     const clipboardData = event.clipboardData || window.clipboardData;
     if (!clipboardData) return;
 
     const pastedText = clipboardData.getData("text/plain");
     if (!pastedText || pastedText.trim().length === 0) return;
 
-    // Run sanitizer with custom rules
     const result = PromptGodSanitizer.sanitize(pastedText, cachedCustomRules);
 
-    // If nothing was found, let the normal paste go through
-    if (result.extracted.length === 0) {
-      console.log(`${LOG_PREFIX} Paste scanned — no secrets found. Passing through.`);
-      return;
-    }
+    if (result.extracted.length === 0) return;
 
-    // Secrets found! Prevent the original paste.
     event.preventDefault();
     event.stopImmediatePropagation();
 
-    console.log(
-      `${LOG_PREFIX} 🛡️ Intercepted paste! Masked ${result.extracted.length} secret(s).`
-    );
-
-    // Insert the masked text into the input
-    insertTextIntoInput(target, result.maskedText);
-
-    // Save the extracted secrets to local storage for the Vault
-    saveToVault(result.extracted);
-
-    // Show a brief notification on the page
-    showNotification(result.extracted.length);
-  }
-
-  /**
-   * Check if an element is (or is inside) a known chat input.
-   */
-  function isChatInput(element) {
-    if (!element) return false;
-    const selectors = getSelectorsForCurrentSite();
-    for (const selector of selectors) {
-      // The element itself matches
-      if (element.matches && element.matches(selector)) return true;
-      // The element is inside a matching container
-      if (element.closest && element.closest(selector)) return true;
+    if (DEBUG) {
+      console.log(
+        `${LOG_PREFIX} 🛡️ Intercepted paste! Masked ${result.extracted.length} secret(s).`
+      );
     }
-    return false;
+
+    insertTextIntoInput(target, result.maskedText);
+    scheduleVaultSave(result.extracted);
+    showNotification(result.extracted.length);
   }
 
   // ---------------------------------------------------------------
@@ -395,6 +382,18 @@
   // ---------------------------------------------------------------
 
   /**
+   * Defer vault writes so paste handling returns to the browser immediately.
+   */
+  function scheduleVaultSave(extractedItems) {
+    const run = () => saveToVault(extractedItems);
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(run, { timeout: 2000 });
+    } else {
+      queueMicrotask(run);
+    }
+  }
+
+  /**
    * Save extracted secrets to chrome.storage.local so the popup
    * (The Vault) can display them.
    */
@@ -426,7 +425,7 @@
 
         chrome.storage.local.set({ vault }, () => {
           if (chrome.runtime.lastError) return;
-          console.log(`${LOG_PREFIX} Saved ${entry.items.length} item(s) to the Vault.`);
+          if (DEBUG) console.log(`${LOG_PREFIX} Saved ${entry.items.length} item(s) to the Vault.`);
         });
       });
     } catch (e) {
@@ -553,10 +552,9 @@
    * Find the active chat input and sanitize its current text content.
    */
   function sanitizeCurrentInput() {
-    const selectors = getSelectorsForCurrentSite();
     let inputEl = null;
 
-    for (const selector of selectors) {
+    for (const selector of cachedSelectors) {
       inputEl = document.querySelector(selector);
       if (inputEl) break;
     }
@@ -602,7 +600,7 @@
       document.execCommand("insertText", false, result.maskedText);
     }
 
-    saveToVault(result.extracted);
+    scheduleVaultSave(result.extracted);
     showNotification(result.extracted.length);
   }
 
@@ -660,14 +658,25 @@
   // Use capture phase so we get the paste event before the editor does
   document.addEventListener("paste", handlePaste, true);
 
-  // Inject the Sanitize button once the page is ready
-  if (document.readyState === "complete" || document.readyState === "interactive") {
-    setTimeout(injectSanitizeButton, 1500);
-  } else {
-    window.addEventListener("load", () => setTimeout(injectSanitizeButton, 1500));
+  // Inject the Sanitize button when the browser is idle (non-blocking)
+  function scheduleSanitizeButton() {
+    const inject = () => injectSanitizeButton();
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(inject, { timeout: 3000 });
+    } else {
+      setTimeout(inject, 1500);
+    }
   }
 
-  console.log(
-    `${LOG_PREFIX} ✅ Content script active on ${window.location.hostname}. Paste interception is ON.`
-  );
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    scheduleSanitizeButton();
+  } else {
+    window.addEventListener("load", scheduleSanitizeButton, { once: true });
+  }
+
+  if (DEBUG) {
+    console.log(
+      `${LOG_PREFIX} ✅ Content script active on ${window.location.hostname}. Paste interception is ON.`
+    );
+  }
 })();

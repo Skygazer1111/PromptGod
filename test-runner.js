@@ -75,8 +75,32 @@ t(S.isFalsePositive("AWS_DEFAULT_REGION", ""), "AWS_DEFAULT_REGION is false posi
 t(S.isFalsePositive("SENDGRID_API_KEY", ""), "SENDGRID_API_KEY is false positive");
 t(S.isFalsePositive("SLACK_WEBHOOK_URL", ""), "SLACK_WEBHOOK_URL is false positive");
 t(S.isFalsePositive("S3_BUCKET_NAME", ""), "S3_BUCKET_NAME is false positive");
+t(S.isFalsePositive("123e4567-e89b-12d3-a456-426614174000", ""), "UUID is false positive");
+t(S.isFalsePositive("a9993e3647abcdef1234567890abcdef12345678", ""), "Git commit SHA-1 is false positive");
+t(S.isFalsePositive("6c8b201a74d2fe9365e10cf4a859b207a1b2c3d4e5f6789012345678901234ab", ""), "SHA-256 hex is false positive");
+t(S.isFalsePositive("//github.com/user/repo.git", ""), "Protocol-relative GitHub URL is false positive");
+t(S.isFalsePositive("github.com/Skygazer1111/PromptGod.git", ""), "GitHub repo path is false positive");
 
-console.log("\n=== 6. Multi-line / Mixed Content ===");
+console.log("\n=== 6. Operational / Diagnostic Content ===");
+t(
+  S.sanitize("commit a9993e3647abcdef1234567890abcdef12345678").extracted.length === 0,
+  "Git commit hash preserved"
+);
+t(
+  S.sanitize('"transaction_id": "123e4567-e89b-12d3-a456-426614174000"').extracted.length === 0,
+  "Transaction UUID preserved"
+);
+const gitRemote =
+  "origin  [https://github.com/Skygazer1111/PromptGod.git](https://github.com/Skygazer1111/PromptGod.git) (fetch)";
+const gr = S.sanitize(gitRemote);
+t(gr.extracted.length === 0, "Git remote markdown links preserved");
+t(gr.maskedText === gitRemote, "Git remote text unchanged");
+t(
+  S.sanitize('{"gateway_hash": "aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV"}').extracted.length > 0,
+  "Named secret hash values still masked"
+);
+
+console.log("\n=== 7. Multi-line / Mixed Content ===");
 const envFile = `# Database config
 DB_HOST=localhost
 DB_PORT=5432
@@ -141,7 +165,7 @@ t(rr.maskedText.includes("S3_BUCKET_NAME="), "Real .env: S3_BUCKET_NAME name pre
 t(rr.maskedText.includes("APP_ENV=production"), "Real .env: safe APP_ENV preserved");
 t(rr.maskedText.includes("DB_POOL_MAX=20"), "Real .env: safe DB_POOL_MAX preserved");
 
-console.log("\n=== 7. Edge Cases ===");
+console.log("\n=== 8. Edge Cases ===");
 t(S.sanitize("").extracted.length === 0, "Empty string: no errors");
 t(S.sanitize(null).maskedText === null, "Null returns null");
 t(S.sanitize(undefined).maskedText === undefined, "Undefined returns undefined");
@@ -151,7 +175,7 @@ t(S.sanitize("sk-abc123XYZ456def789ghij is my key").extracted.length > 0, "Key a
 t(S.sanitize("My key is sk-abc123XYZ456def789ghij").extracted.length > 0, "Key at end detected");
 t(S.sanitize("Key1: sk-abc123XYZ456def789ghij and Key2: sk-abc123XYZ456def789ghij").extracted.length === 1, "Duplicate keys deduplicated");
 
-console.log("\n=== 8. Entropy Function ===");
+console.log("\n=== 9. Entropy Function ===");
 t(S.calculateEntropy("aaaaaaaaaa") === 0, "Repeated char: entropy = 0");
 t(Math.abs(S.calculateEntropy("abababababababab") - 1.0) < 0.01, "Two chars: entropy ≈ 1.0");
 t(S.calculateEntropy("aB3cD5eF0gH7iJ9kL1mN2oP4qR6sT8uV") > 3.5, "Random string: entropy > 3.5");

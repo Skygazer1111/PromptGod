@@ -489,6 +489,9 @@ const PromptGodSanitizer = (() => {
         // Skip very short matches (likely false positives)
         if (sensitiveValue.length < 6) continue;
 
+        const matchContext = getMatchContext(maskedText, match.index, fullMatch.length);
+        if (isFalsePositive(sensitiveValue, matchContext)) continue;
+
         // Show first 1/4 of the key, star the remaining 3/4
         const visibleLen = Math.ceil(sensitiveValue.length / 4);
         const visiblePart = sensitiveValue.substring(0, visibleLen);
@@ -594,6 +597,14 @@ const PromptGodSanitizer = (() => {
   function isLikelySecret(str) {
     if (!str || str.length < MIN_SECRET_LENGTH || str.length > MAX_SECRET_LENGTH) return false;
 
+    const clean = normalizeCandidate(str);
+
+    // Pure hex digests and UUIDs are operational identifiers, not API secrets
+    if (/^[0-9a-f]{40}$/i.test(clean) || /^[0-9a-f]{64}$/i.test(clean)) return false;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
+      return false;
+    }
+
     // Must be primarily printable ASCII, no whitespace
     if (/\s/.test(str)) return false;
 
@@ -625,65 +636,102 @@ const PromptGodSanitizer = (() => {
     return true;
   }
 
+  // =====================================================================
+  // FALSE POSITIVE / SAFE STRUCTURE DETECTION
+  // =====================================================================
+
+  /**
+   * Strip wrapping quotes/brackets before structural checks.
+   */
+  function normalizeCandidate(str) {
+    return str.replace(/^['"\[\]]+|['"\[\]]+$/g, "").trim();
+  }
+
+  /**
+   * Surrounding text for contextual false-positive checks.
+   */
+  function getMatchContext(text, index, length) {
+    return text.substring(
+      Math.max(0, index - 50),
+      Math.min(text.length, index + length + 50)
+    );
+  }
+
   /**
    * False positive filter: exclude strings that look like secrets but aren't.
    * @param {string} str - The candidate secret string.
    * @param {string} context - Surrounding text for contextual checks.
    * @returns {boolean} True if this is a false positive (should NOT be masked).
    */
-  function isFalsePositive(str, context) {
-    // URLs (http://, https://, ftp://)
-    if (/^https?:\/\//i.test(str) || /^ftp:\/\//i.test(str)) return true;
+  function isFalsePositive(str, context = "") {
+    const cleanStr = normalizeCandidate(str);
+    const ctx = context || "";
+
+    // ─── Operational identifiers (safe in logs / git output) ───
+    // UUIDs — transaction_id, correlation_id, trace spans, etc.
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanStr)) {
+      return true;
+    }
+
+    // Git SHA-1 commit hash (40 hex)
+    if (/^[0-9a-f]{40}$/i.test(cleanStr)) return true;
+
+    // SHA-256 / SHA-512 content hashes (64 / 128 hex) — diagnostic, not credentials
+    if (/^[0-9a-f]{64}$/i.test(cleanStr)) return true;
+    if (/^[0-9a-f]{128}$/i.test(cleanStr)) return true;
+
+    // Abbreviated git commit hash when git log/output context is present
+    if (/^[0-9a-f]{7,39}$/i.test(cleanStr) && /\bcommit\s+$/i.test(ctx)) return true;
+
+    // ─── URLs & repository paths ───
+    if (/^https?:\/\//i.test(cleanStr) || /^ftp:\/\//i.test(cleanStr)) return true;
+    // Protocol-relative URLs (e.g. //github.com/... after https: is stripped by tokenizers)
+    if (/^\/\/[a-z0-9][a-z0-9.-]*\//i.test(cleanStr)) return true;
+    if (/^(?:www\.)?(?:github|gitlab|bitbucket)\.com\//i.test(cleanStr)) return true;
+    if (/^git@[\w.-]+:/i.test(cleanStr)) return true;
+    if (/\.git$/i.test(cleanStr) && /[/.]/.test(cleanStr)) return true;
 
     // Email addresses
-    if (/^[^@]+@[^@]+\.[^@]+$/.test(str)) return true;
+    if (/^[^@]+@[^@]+\.[^@]+$/.test(cleanStr)) return true;
 
     // File paths (Unix or Windows)
-    if (/^\/[a-z_]/i.test(str) || /^[A-Z]:\\/i.test(str)) return true;
-    if (/^\.\//.test(str) || /^\.\.\//.test(str)) return true;
+    if (/^\/[a-z_]/i.test(cleanStr) || /^[A-Z]:\\/i.test(cleanStr)) return true;
+    if (/^\.\//.test(cleanStr) || /^\.\.\//.test(cleanStr)) return true;
 
     // CSS/HTML values: hex colors (#fff, #ffffff), common CSS functions
-    if (/^#[0-9a-fA-F]{3,8}$/.test(str)) return true;
-    if (/^(rgb|hsl|rgba|hsla|url|calc|var)\(/i.test(str)) return true;
+    if (/^#[0-9a-fA-F]{3,8}$/.test(cleanStr)) return true;
+    if (/^(rgb|hsl|rgba|hsla|url|calc|var)\(/i.test(cleanStr)) return true;
 
     // Package versions (semver-like)
-    if (/^\d+\.\d+\.\d+/.test(str)) return true;
+    if (/^\d+\.\d+\.\d+/.test(cleanStr)) return true;
 
     // Common programming identifiers / camelCase / snake_case words that are code, not secrets
-    // If it looks like a function call or method chain
-    if (/\(\)/.test(str) || /\.\w+\(/.test(str)) return true;
+    if (/\(\)/.test(cleanStr) || /\.\w+\(/.test(cleanStr)) return true;
 
     // Repeated character strings (aaaaaaa, 1111111, etc.)
-    if (/^(.)\1{7,}$/.test(str)) return true;
+    if (/^(.)\1{7,}$/.test(cleanStr)) return true;
 
     // Key=value assignments (e.g., DB_HOST=localhost, APP_NAME=PromptGod)
-    // These are config assignments, not secrets themselves
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(str)) return true;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(cleanStr)) return true;
 
-    // If the string is a common word or phrase (has too many dictionary-like patterns)
-    // Strings that are mostly lowercase alphabetic with few digits are likely prose
-    const alphaRatio = (str.match(/[a-zA-Z]/g) || []).length / str.length;
-    const digitRatio = (str.match(/[0-9]/g) || []).length / str.length;
-    // Pure lowercase words separated by hyphens/underscores are likely identifiers, not secrets
-    if (/^[a-z]+([_-][a-z]+){2,}$/.test(str) && digitRatio === 0) return true;
+    const digitRatio = (cleanStr.match(/[0-9]/g) || []).length / cleanStr.length;
+    if (/^[a-z]+([_-][a-z]+){2,}$/.test(cleanStr) && digitRatio === 0) return true;
 
     // ALL-UPPERCASE snake_case identifiers are ENV variable names, not secret values
-    // e.g., OAUTH_ENCRYPTION_KEY, STRIPE_WEBHOOK_SECRET, AWS_DEFAULT_REGION
-    // Requires at least one underscore to avoid catching uppercase secrets like AKIA...
-    if (/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(str)) return true;
+    if (/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(cleanStr)) return true;
 
     // CamelCase or PascalCase identifiers (programming variable names, not secrets)
-    // e.g., PromptGodSanitizer, getElementById, myCustomFunction
-    if (/^[a-z][a-zA-Z0-9]*$/.test(str) && digitRatio < 0.3 && str.length < 30) return true;
-    if (/^[A-Z][a-zA-Z0-9]*$/.test(str) && digitRatio < 0.3 && str.length < 30) return true;
+    if (/^[a-z][a-zA-Z0-9]*$/.test(cleanStr) && digitRatio < 0.3 && cleanStr.length < 30) return true;
+    if (/^[A-Z][a-zA-Z0-9]*$/.test(cleanStr) && /[a-z]/.test(cleanStr) && digitRatio < 0.3 && cleanStr.length < 30) {
+      return true;
+    }
 
     // If already contains stars (already masked by a previous rule)
-    if (/\*{4,}/.test(str)) return true;
+    if (/\*{4,}/.test(cleanStr)) return true;
 
     // JSON structural tokens
-    if (/^[{}\[\]:,]+$/.test(str)) return true;
+    if (/^[{}\[\]:,]+$/.test(cleanStr)) return true;
 
-    // Commonly seen safe long strings that aren't secrets
     const safePrefixes = [
       "data:image/",
       "data:application/",
@@ -692,7 +740,7 @@ const PromptGodSanitizer = (() => {
       "sha512-",
       "integrity=",
     ];
-    if (safePrefixes.some((p) => str.startsWith(p))) return true;
+    if (safePrefixes.some((p) => cleanStr.startsWith(p))) return true;
 
     return false;
   }
@@ -733,8 +781,8 @@ const PromptGodSanitizer = (() => {
             value,
             start: match.index,
             context: text.substring(
-              Math.max(0, match.index - 20),
-              Math.min(text.length, match.index + match[0].length + 20)
+              Math.max(0, match.index - 50),
+              Math.min(text.length, match.index + match[0].length + 50)
             ),
           });
         }
@@ -758,8 +806,8 @@ const PromptGodSanitizer = (() => {
           value: token,
           start: tokenMatch.index,
           context: text.substring(
-            Math.max(0, tokenMatch.index - 20),
-            Math.min(text.length, tokenMatch.index + tokenMatch[0].length + 20)
+            Math.max(0, tokenMatch.index - 50),
+            Math.min(text.length, tokenMatch.index + tokenMatch[0].length + 50)
           ),
         });
       }

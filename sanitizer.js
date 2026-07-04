@@ -345,7 +345,7 @@ const PromptGodSanitizer = (() => {
     // ─────────────────────────────────────────────────────────────────
     {
       name: "ENV Variable (Secret/Key/Token/Password)",
-      regex: /(?:^|[\s;,])([A-Z_]{2,}(?:SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|API_KEY|AUTH|CREDENTIAL|ACCESS)[A-Z_]*)\s*=\s*["']?([^\s"'#;]+)["']?/gim,
+      regex: /(?:^|[\s;,])([A-Z][A-Z0-9_]*(?:SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|API_KEY|_AUTH_|CREDENTIAL|ACCESS)[A-Z0-9_]*)\s*=\s*["']?([^"'\s;]+)["']?/gm,
       description: "Environment variable containing a secret value",
       captureGroup: 2,
     },
@@ -367,9 +367,26 @@ const PromptGodSanitizer = (() => {
     },
     {
       name: "Password in URL",
-      regex: /:\/\/([^:\s]+):([^@\s\n]+)@/g,
-      description: "Credentials embedded in a URL",
+      regex: /:\/\/([^:\s\/]+):(.+)@([a-zA-Z0-9][a-zA-Z0-9._-]*(?::\d+)?)/g,
+      description: "Credentials embedded in a URL (password may contain @, #, %, !)",
       captureGroup: 2,
+    },
+    {
+      name: "Proxy Auth Assignment",
+      regex: /(?:proxy_auth|auth_proxy|proxy_uri)\s*=\s*["']?([a-zA-Z0-9_-]+):(.+)@([a-zA-Z0-9][a-zA-Z0-9._-]*\.[a-zA-Z0-9._-]+)/gi,
+      description: "proxy_auth=user:password@host assignment strings",
+      captureGroup: 2,
+    },
+    {
+      name: "Inline URI Credentials",
+      regex: /(?:^|[\s;,])([a-z][a-z0-9_-]*):(.+)@([a-zA-Z0-9][a-zA-Z0-9._-]*\.[a-zA-Z0-9._-]+)/g,
+      description: "Inline user:password@host credentials (password may contain @, #, %, !)",
+      captureGroup: 2,
+    },
+    {
+      name: "Custom Prefixed API Secret",
+      regex: /\b([a-z]{2,}_(?:sec(?:ret)?|api)_(?:live_|test_)?[a-z0-9_]{16,})\b/gi,
+      description: "Custom vendor-prefixed API secret (e.g. cmp_sec_live_...)",
     },
 
     // ─────────────────────────────────────────────────────────────────
@@ -604,6 +621,7 @@ const PromptGodSanitizer = (() => {
 
   // Entropy threshold: strings above this are likely random/secret
   const ENTROPY_THRESHOLD = 3.5;
+  const SECRET_KEY_CONTEXT_RE = /[A-Z][A-Z0-9_]*(?:SECRET|KEY|TOKEN|PASSWORD|_AUTH_|CREDENTIAL|ACCESS)[A-Z0-9_]*\s*[=:]\s*["']?/i;
 
   // Length bounds for candidate secrets
   const MIN_SECRET_LENGTH = 16;
@@ -615,10 +633,11 @@ const PromptGodSanitizer = (() => {
    * @param {string} str
    * @returns {boolean}
    */
-  function isLikelySecret(str) {
+  function isLikelySecret(str, context = "") {
     if (!str || str.length < MIN_SECRET_LENGTH || str.length > MAX_SECRET_LENGTH) return false;
 
     const clean = normalizeCandidate(str);
+    const ctx = context || "";
 
     // Pure hex digests and UUIDs are operational identifiers, not API secrets
     if (/^[0-9a-f]{40}$/i.test(clean) || /^[0-9a-f]{64}$/i.test(clean)) return false;
@@ -626,14 +645,15 @@ const PromptGodSanitizer = (() => {
       return false;
     }
 
+    // Prefixed vendor secrets (cmp_sec_live_, acme_api_test_, etc.)
+    if (/^[a-z]{2,}_(?:sec(?:ret)?|api)_(?:live_|test_)?[a-z0-9_]{16,}$/i.test(clean)) return true;
+
     // Dotted domain/namespace paths are infrastructure identifiers, not secrets
-    // e.g. networking.k8s.io/v1, apps.kubernetes.io, rbac.authorization.k8s.io/v1beta1
     // Must be all-lowercase to avoid matching API keys like SG.xxx.yyy (SendGrid)
     if (/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+/.test(clean)) return false;
 
-    // Underscore-separated lowercase identifiers are code/config names, not secret values
-    // e.g. encryption_key_v2, database_connection_string, app_secret_key
-    if (/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(clean)) return false;
+    // Underscore-separated lowercase identifiers are config names — unless assigned to a secret key
+    if (/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(clean) && !SECRET_KEY_CONTEXT_RE.test(ctx)) return false;
 
     // Must be primarily printable ASCII, no whitespace
     if (/\s/.test(str)) return false;
@@ -642,26 +662,23 @@ const PromptGodSanitizer = (() => {
     const hasUpper = /[A-Z]/.test(str);
     const hasLower = /[a-z]/.test(str);
     const hasDigit = /[0-9]/.test(str);
-    const hasSpecial = /[_\-+/=.]/.test(str);
+    const hasSpecial = /[_\-+#%!=@$./]/.test(str);
 
     // Must use at least 2 character classes (mixed)
     const classCount = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length;
     if (classCount < 2) return false;
 
-    // Check for known key character sets:
-    // - Base64-like:  [A-Za-z0-9+/=]
-    // - Hex:          [0-9a-fA-F]
-    // - URL-safe B64: [A-Za-z0-9_-]
-    // - Alphanumeric: [A-Za-z0-9]
-    const isBase64Like = /^[A-Za-z0-9+/=_\-]+$/.test(str);
+    const isBase64Like = /^[A-Za-z0-9+/=_\-#$%!@]+$/.test(str);
     const isHexLike = /^[0-9a-fA-F]+$/.test(str) && str.length >= 32;
-    const isAlphanumericPlus = /^[A-Za-z0-9_\-:.+/=]+$/.test(str);
+    const isAlphanumericPlus = /^[A-Za-z0-9_\-:.+/=#%!@$]+$/.test(str);
 
     if (!isBase64Like && !isHexLike && !isAlphanumericPlus) return false;
 
-    // Check entropy threshold
     const entropy = calculateEntropy(str);
-    if (entropy < ENTROPY_THRESHOLD) return false;
+    const threshold = SECRET_KEY_CONTEXT_RE.test(ctx)
+      ? ENTROPY_THRESHOLD * 0.8
+      : ENTROPY_THRESHOLD;
+    if (entropy < threshold) return false;
 
     return true;
   }
@@ -733,8 +750,13 @@ const PromptGodSanitizer = (() => {
     if (/^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)+$/.test(cleanStr)) return true;
 
     // Underscore-separated lowercase identifiers (config keys, field names)
-    // e.g. encryption_key_v2, database_url, app_secret_key
-    if (/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(cleanStr)) return true;
+    // e.g. encryption_key_v2, database_url — but not secret values after SECRET=/KEY=
+    if (/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(cleanStr)) {
+      const digitRatio = (cleanStr.match(/[0-9]/g) || []).length / cleanStr.length;
+      const secretKeyContext = SECRET_KEY_CONTEXT_RE.test(ctx);
+      if (!secretKeyContext && (cleanStr.length < 24 || digitRatio < 0.25)) return true;
+      if (secretKeyContext) return false;
+    }
 
     // File names with common extensions
     if (/\.(ya?ml|json|toml|ini|cfg|conf|xml|html?|css|jsx?|tsx?|py|rb|go|rs|sh|bat|ps1|md|txt|log|env)$/i.test(cleanStr)) {
@@ -896,7 +918,7 @@ const PromptGodSanitizer = (() => {
       if (isFalsePositive(value, context)) continue;
 
       // Run structural + entropy check
-      if (isLikelySecret(value)) {
+      if (isLikelySecret(value, context)) {
         secrets.push({
           value,
           entropy: calculateEntropy(value),

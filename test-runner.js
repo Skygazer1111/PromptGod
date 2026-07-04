@@ -166,6 +166,19 @@ t(hjr.maskedText.includes('"pool_size": 25'), "Heavy JSON: pool_size value prese
 t((hjr.maskedText.match(/\}/g) || []).length === (heavyJson.match(/\}/g) || []).length, "Heavy JSON: all closing braces preserved");
 t(hjr.extracted.length >= 3, "Heavy JSON: secrets still detected (" + hjr.extracted.length + ")");
 
+// Final 1% leaks — proxy special-char passwords and custom-prefixed secrets
+const proxyLeak = 'proxy_auth=admin:k3y_w1th_sp3c1al_ch@rs#%!@proxy.node';
+const proxyQuoted = '- Connection Proxy String: "proxy_auth=admin:k3y_w1th_sp3c1al_ch@rs#%!@proxy.node"';
+const customSecret = "COMPUS_API_SECRET=cmp_sec_live_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c";
+const proxyRes = S.sanitize(proxyLeak);
+const proxyQuotedRes = S.sanitize(proxyQuoted);
+const customSecretRes = S.sanitize(customSecret);
+t(proxyRes.extracted.length > 0 && proxyRes.maskedText.includes("k3y_w1t"), "Proxy auth password with # % ! masked");
+t(!proxyRes.maskedText.includes("k3y_w1th_sp3c1al_ch@rs#%!"), "Proxy auth password fully redacted");
+t(proxyQuotedRes.extracted.length > 0 && proxyQuotedRes.maskedText.includes('"proxy_auth=admin:'), "Quoted proxy string label preserved");
+t(customSecretRes.extracted.length > 0 && customSecretRes.maskedText.includes("cmp_sec_live"), "Custom prefixed API secret masked");
+t(customSecretRes.maskedText.includes("COMPUS_API_SECRET="), "Custom secret env key name preserved");
+
 console.log("\n=== 8. Multi-line / Mixed Content ===");
 const envFile = `# Database config
 DB_HOST=localhost

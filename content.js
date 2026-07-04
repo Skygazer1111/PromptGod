@@ -14,6 +14,7 @@
   const DEBUG = false; // Set true only when debugging — avoids console overhead on every paste
   let isEnabled = true;
   let cachedCustomRules = []; // Compiled custom rules from storage
+  let vaultSaveUnavailableNotified = false;
 
   /**
    * Check if the extension context is still valid.
@@ -227,7 +228,7 @@
     }
 
     insertTextIntoInput(target, result.maskedText);
-    scheduleVaultSave(result.extracted);
+    saveToVault(result.extracted);
     showNotification(result.extracted.length);
   }
 
@@ -382,24 +383,14 @@
   // ---------------------------------------------------------------
 
   /**
-   * Defer vault writes so paste handling returns to the browser immediately.
-   */
-  function scheduleVaultSave(extractedItems) {
-    const run = () => saveToVault(extractedItems);
-    if (typeof requestIdleCallback === "function") {
-      requestIdleCallback(run, { timeout: 2000 });
-    } else {
-      queueMicrotask(run);
-    }
-  }
-
-  /**
-   * Save extracted secrets to chrome.storage.local so the popup
-   * (The Vault) can display them.
+   * Save extracted secrets to the Vault via the background worker.
+   * Runs immediately while the extension context is still valid (paste handler).
    */
   function saveToVault(extractedItems) {
+    if (!extractedItems?.length) return;
+
     if (!isExtensionContextValid()) {
-      console.warn(`${LOG_PREFIX} Extension context invalidated, skipping vault save.`);
+      notifyVaultUnavailable();
       return;
     }
 
@@ -415,22 +406,33 @@
     };
 
     try {
-      chrome.storage.local.get("vault", (data) => {
-        if (chrome.runtime.lastError) return;
-        const vault = data.vault || [];
-        vault.unshift(entry); // newest first
-
-        // Keep only the last 100 entries to avoid storage bloat
-        if (vault.length > 100) vault.length = 100;
-
-        chrome.storage.local.set({ vault }, () => {
-          if (chrome.runtime.lastError) return;
-          if (DEBUG) console.log(`${LOG_PREFIX} Saved ${entry.items.length} item(s) to the Vault.`);
-        });
+      chrome.runtime.sendMessage({ type: "SAVE_VAULT", entry }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          notifyVaultUnavailable();
+          return;
+        }
+        if (DEBUG) {
+          console.log(`${LOG_PREFIX} Saved ${entry.items.length} item(s) to the Vault.`);
+        }
       });
-    } catch (e) {
-      console.warn(`${LOG_PREFIX} Extension context lost, vault save skipped.`);
+    } catch {
+      notifyVaultUnavailable();
     }
+  }
+
+  /**
+   * Shown once per page when masking works but Vault sync cannot run
+   * (usually after reloading the extension without refreshing the tab).
+   */
+  function notifyVaultUnavailable() {
+    if (vaultSaveUnavailableNotified) return;
+    vaultSaveUnavailableNotified = true;
+    if (DEBUG) {
+      console.warn(`${LOG_PREFIX} Vault save unavailable — extension context invalidated. Refresh the page.`);
+    }
+    showNotificationMessage(
+      "Secrets were masked. Refresh this page to sync with the Vault."
+    );
   }
 
   // ---------------------------------------------------------------
@@ -600,7 +602,7 @@
       document.execCommand("insertText", false, result.maskedText);
     }
 
-    scheduleVaultSave(result.extracted);
+    saveToVault(result.extracted);
     showNotification(result.extracted.length);
   }
 

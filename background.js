@@ -36,4 +36,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === "SAVE_VAULT") {
+    const entry = message.entry;
+    if (!entry || !Array.isArray(entry.items) || entry.items.length === 0) {
+      sendResponse({ ok: false });
+      return false;
+    }
+
+    chrome.storage.local.get("vault", (data) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ ok: false });
+        return;
+      }
+      const vault = data.vault || [];
+      vault.unshift(entry);
+      if (vault.length > 100) vault.length = 100;
+      chrome.storage.local.set({ vault }, () => {
+        sendResponse({ ok: !chrome.runtime.lastError });
+      });
+    });
+    return true;
+  }
 });

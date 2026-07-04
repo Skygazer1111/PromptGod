@@ -345,7 +345,7 @@ const PromptGodSanitizer = (() => {
     // ─────────────────────────────────────────────────────────────────
     {
       name: "ENV Variable (Secret/Key/Token/Password)",
-      regex: /(?:^|[\s;,])([A-Z][A-Z0-9_]*(?:SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|API_KEY|_AUTH_|CREDENTIAL|ACCESS)[A-Z0-9_]*)\s*=\s*["']?([^"'\s;]+)["']?/gm,
+      regex: /(?:^|[-\s;,])([A-Z][A-Z0-9_]*(?:SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|API_KEY|_AUTH_|CREDENTIAL|ACCESS)[A-Z0-9_]*)\s*=\s*["']?([^"'\s;]+)["']?/gm,
       description: "Environment variable containing a secret value",
       captureGroup: 2,
     },
@@ -366,22 +366,10 @@ const PromptGodSanitizer = (() => {
       description: "Database connection URI (may contain credentials)",
     },
     {
-      name: "Password in URL",
-      regex: /:\/\/([^:\s\/]+):(.+)@([a-zA-Z0-9][a-zA-Z0-9._-]*(?::\d+)?)/g,
-      description: "Credentials embedded in a URL (password may contain @, #, %, !)",
-      captureGroup: 2,
-    },
-    {
-      name: "Proxy Auth Assignment",
-      regex: /(?:proxy_auth|auth_proxy|proxy_uri)\s*=\s*["']?([a-zA-Z0-9_-]+):(.+)@([a-zA-Z0-9][a-zA-Z0-9._-]*\.[a-zA-Z0-9._-]+)/gi,
-      description: "proxy_auth=user:password@host assignment strings",
-      captureGroup: 2,
-    },
-    {
-      name: "Inline URI Credentials",
-      regex: /(?:^|[\s;,])([a-z][a-z0-9_-]*):(.+)@([a-zA-Z0-9][a-zA-Z0-9._-]*\.[a-zA-Z0-9._-]+)/g,
-      description: "Inline user:password@host credentials (password may contain @, #, %, !)",
-      captureGroup: 2,
+      name: "Inline Credential Password",
+      regex: /(?<=(?:\/\/|proxy_auth=|auth_proxy=|proxy_uri=)["']?[a-zA-Z0-9._-]+:)(.+)(?=@(?:[a-zA-Z0-9][\w.-]*\.[a-zA-Z0-9._-]+)(?::\d+)?)/gi,
+      description: "Password between user: and @host (supports @, #, %, ! in password)",
+      captureGroup: 0,
     },
     {
       name: "Custom Prefixed API Secret",
@@ -430,8 +418,9 @@ const PromptGodSanitizer = (() => {
 
   // Fast pre-scan: skip full regex pipeline on obviously safe text (e.g. plain prose)
   const SECRET_HINT_RE =
-    /(?:sk-(?:ant-)?|AKIA[0-9A-Z]|ghp_|gho_|ghu_|ghs_|github_pat_|glpat-|hf_|npm_|pypi-|xox[bprs]-|Bearer\s|eyJ[A-Za-z0-9_-]{10,}\.|-----BEGIN|AIza[A-Za-z0-9_-]|GOCSPX-|SG\.|key-[A-Za-z0-9]|dop_v1_|sq0atp-|r8_|pk_(?:live_|test_)|sk_(?:live_|test_)|hooks\.slack|whsec_|mongodb(?:\+srv)?:|postgres(?:ql)?:|mysql:|redis:|:\/\/[^:]+:[^@]+@|[A-Z_]{2,}(?:SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|API_KEY|AUTH|CREDENTIAL|ACCESS)[A-Z_]*\s*=)/i;
-  const LONG_TOKEN_RE = /[A-Za-z0-9_\-+/=]{20,}/;
+    /(?:sk-(?:ant-)?|AKIA[0-9A-Z]|ghp_|gho_|ghu_|ghs_|github_pat_|glpat-|hf_|npm_|pypi-|xox[bprs]-|Bearer\s|eyJ[A-Za-z0-9_-]{10,}\.|-----BEGIN|AIza[A-Za-z0-9_-]|GOCSPX-|SG\.|key-[A-Za-z0-9]|dop_v1_|sq0atp-|r8_|pk_(?:live_|test_)|sk_(?:live_|test_)|hooks\.slack|whsec_|proxy_auth\s*=|_sec_(?:live_|test_)?|cmp_sec|mongodb(?:\+srv)?:|postgres(?:ql)?:|mysql:|redis:|:\/\/[^:]+:.+@|[A-Z_]{2,}(?:SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|API_KEY|AUTH|CREDENTIAL|ACCESS)[A-Z_]*\s*=)/i;
+  const LONG_TOKEN_RE = /[A-Za-z0-9_\-+#%!=@.$/:]{16,}/;
+  const SECURITY_KEYWORD_RE = /(?:SECRET|KEY|TOKEN|PASSWORD|PASS|AUTH|CREDENTIAL)/i;
 
   // Skip expensive entropy pass on very large pastes (regex rules still run)
   const MAX_ENTROPY_CHARS = 500_000;
@@ -493,8 +482,13 @@ const PromptGodSanitizer = (() => {
       if (contextRules.length > 0) {
         processed = applyRules(contextRules, processed, extracted, seen);
       }
-      if (runEntropy || extracted.length > 0) {
-        processed = applyEntropyDetection(processed, extracted, seen);
+      const lineNeedsEntropy =
+        runEntropy ||
+        extracted.length > 0 ||
+        SECURITY_KEYWORD_RE.test(line) ||
+        /proxy_auth\s*=/i.test(line);
+      if (lineNeedsEntropy) {
+        processed = applyEntropyDetection(processed, extracted, seen, line);
       }
       return processed;
     }).join("\n");
@@ -509,7 +503,7 @@ const PromptGodSanitizer = (() => {
     for (const rule of rules) {
       const regex = rule.regex;
       regex.lastIndex = 0;
-      const captureGroup = rule.captureGroup || 1;
+      const captureGroup = rule.captureGroup !== undefined ? rule.captureGroup : 1;
 
       let match;
       const replacements = [];
@@ -519,7 +513,7 @@ const PromptGodSanitizer = (() => {
       while ((match = regex.exec(maskedText)) !== null && iterations < MAX_ITERATIONS) {
         iterations++;
         const fullMatch = match[0];
-        const sensitiveValue = match[captureGroup] || match[0];
+        const sensitiveValue = captureGroup === 0 ? fullMatch : (match[captureGroup] || fullMatch);
 
         // Skip if already masked in a previous rule
         if (seen.has(sensitiveValue)) continue;
@@ -623,6 +617,20 @@ const PromptGodSanitizer = (() => {
   const ENTROPY_THRESHOLD = 3.5;
   const SECRET_KEY_CONTEXT_RE = /[A-Z][A-Z0-9_]*(?:SECRET|KEY|TOKEN|PASSWORD|_AUTH_|CREDENTIAL|ACCESS)[A-Z0-9_]*\s*[=:]\s*["']?/i;
 
+  /**
+   * Lower entropy barrier when the line/key signals a secret assignment.
+   */
+  function getEntropyThreshold(lineOrContext = "") {
+    if (
+      SECRET_KEY_CONTEXT_RE.test(lineOrContext) ||
+      SECURITY_KEYWORD_RE.test(lineOrContext) ||
+      /proxy_auth\s*=/i.test(lineOrContext)
+    ) {
+      return 3.0;
+    }
+    return ENTROPY_THRESHOLD;
+  }
+
   // Length bounds for candidate secrets
   const MIN_SECRET_LENGTH = 16;
   const MAX_SECRET_LENGTH = 512;
@@ -675,9 +683,7 @@ const PromptGodSanitizer = (() => {
     if (!isBase64Like && !isHexLike && !isAlphanumericPlus) return false;
 
     const entropy = calculateEntropy(str);
-    const threshold = SECRET_KEY_CONTEXT_RE.test(ctx)
-      ? ENTROPY_THRESHOLD * 0.8
-      : ENTROPY_THRESHOLD;
+    const threshold = getEntropyThreshold(ctx);
     if (entropy < threshold) return false;
 
     return true;
@@ -905,7 +911,7 @@ const PromptGodSanitizer = (() => {
    * @param {string} text
    * @returns {Array<{value: string, entropy: number}>}
    */
-  function detectUnknownSecrets(text) {
+  function detectUnknownSecrets(text, lineContext = "") {
     if (!text || text.length < MIN_SECRET_LENGTH) return [];
 
     const candidates = extractCandidates(text);
@@ -913,12 +919,13 @@ const PromptGodSanitizer = (() => {
 
     for (const candidate of candidates) {
       const { value, context } = candidate;
+      const fullContext = lineContext ? `${lineContext} ${context}` : context;
 
       // Run false positive filter
-      if (isFalsePositive(value, context)) continue;
+      if (isFalsePositive(value, fullContext)) continue;
 
-      // Run structural + entropy check
-      if (isLikelySecret(value, context)) {
+      // Run structural + entropy check (line context lowers threshold for _SECRET/_KEY lines)
+      if (isLikelySecret(value, fullContext)) {
         secrets.push({
           value,
           entropy: calculateEntropy(value),
@@ -933,8 +940,8 @@ const PromptGodSanitizer = (() => {
    * Apply entropy-based detection and mask any newly found secrets.
    * Integrates with the main sanitize() pipeline.
    */
-  function applyEntropyDetection(maskedText, extracted, seen) {
-    const secrets = detectUnknownSecrets(maskedText);
+  function applyEntropyDetection(maskedText, extracted, seen, lineContext = "") {
+    const secrets = detectUnknownSecrets(maskedText, lineContext);
 
     for (const secret of secrets) {
       const { value } = secret;
@@ -1012,6 +1019,7 @@ const PromptGodSanitizer = (() => {
     detectUnknownSecrets,
     isLikelySecret,
     isFalsePositive,
+    getEntropyThreshold,
   };
 })();
 

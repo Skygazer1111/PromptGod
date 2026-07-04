@@ -179,6 +179,8 @@ t(proxyQuotedRes.extracted.length > 0 && proxyQuotedRes.maskedText.includes('"pr
 t(customSecretRes.extracted.length > 0 && customSecretRes.maskedText.includes("cmp_sec_live"), "Custom prefixed API secret masked");
 t(customSecretRes.maskedText.includes("COMPUS_API_SECRET="), "Custom secret env key name preserved");
 
+t(S.getEntropyThreshold("COMPUS_API_SECRET=") < S.getEntropyThreshold(""), "Secret line lowers entropy threshold");
+
 console.log("\n=== 8. Multi-line / Mixed Content ===");
 const envFile = `# Database config
 DB_HOST=localhost

@@ -1,4 +1,8 @@
-# 🛡️ PromptGod
+<p align="center">
+  <img src="icons/PromptGodicon.png" alt="PromptGod logo" width="128" height="128">
+</p>
+
+# PromptGod
 
 **AI Prompt Sanitizer** — A Chrome Extension that automatically masks API keys, passwords, and secrets when you paste text into AI chatbots.
 
@@ -21,7 +25,7 @@ Developers paste code, `.env` files, logs, and infrastructure configs into ChatG
 - **Structure-safe processing** — Line-isolated regex pipeline prevents cross-line “chomp” bugs; PEM/RSA multiline keys are still handled correctly
 - **Operational ID preservation** — Does not mask git commit hashes, UUIDs, transaction IDs, K8s API groups (`networking.k8s.io/v1`), or repo URLs
 - **The Vault** — Click the extension icon to review redacted secrets (saved via the background service worker)
-- **Manual Sanitize** — Floating 🛡️ button to scan typed text on demand
+- **Manual Sanitize** — Floating sanitize button to scan typed text on demand
 - **Custom Rules** — Add your own regex patterns or keywords via Settings
 - **Performance-tuned** — Fast-path rejection for plain prose; per-line sanitization; deferred vault writes
 
@@ -70,7 +74,7 @@ PromptGod/
 ├── background.js       # Service worker (vault storage, messaging)
 ├── popup/              # The Vault UI
 ├── options/            # Custom rules settings page
-└── icons/              # Extension icons
+└── icons/              # PromptGodicon.png
 ```
 
 ## Testing

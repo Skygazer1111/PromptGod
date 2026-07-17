@@ -1,4 +1,4 @@
-const S = require("./sanitizer.js");
+const S = require("../test/loader.js");
 const env = `APP_ENV=production
 APP_KEY=base64:v3fS92+N1zK8qLpX7xMv4bNjw93D0sZ1a2C3e4F5g6H=
 DATABASE_URL=postgresql://db_admin_prod:P%40ssw0rd_9872!@pg-cluster-01.internal.net:5432/finance_db?sslmode=require

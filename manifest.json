@@ -23,7 +23,7 @@
     "*://chat.mistral.ai/*"
   ],
   "action": {
-    "default_popup": "popup/popup.html",
+    "default_popup": "src/popup/popup.html",
     "default_icon": {
       "16": "icons/PromptGodicon.png",
       "48": "icons/PromptGodicon.png",
@@ -48,17 +48,31 @@
         "*://chat.deepseek.com/*",
         "*://chat.mistral.ai/*"
       ],
-      "js": ["sanitizer.js", "content.js"],
+      "js": [
+        "src/sanitizer/rules.js",
+        "src/sanitizer/false-positives.js",
+        "src/sanitizer/entropy.js",
+        "src/sanitizer/candidates.js",
+        "src/sanitizer/rule-engine.js",
+        "src/sanitizer/sanitizer.js",
+        "src/content/site-selectors.js",
+        "src/content/toast.js",
+        "src/content/input-inserter.js",
+        "src/content/vault-client.js",
+        "src/content/paste-handler.js",
+        "src/content/sanitize-button.js",
+        "src/content/content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/background.js"
   },
   "icons": {
     "16": "icons/PromptGodicon.png",
     "48": "icons/PromptGodicon.png",
     "128": "icons/PromptGodicon.png"
   },
-  "options_page": "options/options.html"
+  "options_page": "src/options/options.html"
 }

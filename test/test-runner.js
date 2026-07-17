@@ -1,5 +1,5 @@
 // Quick Node.js test runner for the sanitizer engine
-const S = require("./sanitizer.js");
+const S = require("./loader.js");
 
 let pass = 0;
 let fail = 0;
